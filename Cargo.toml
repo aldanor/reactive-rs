@@ -1,8 +1,10 @@
 [package]
-name = "reactive"
+name = "reactive-rs"
 authors = ["Ivan Smirnov <i.s.smirnov@gmail.com>"]
 version = "0.1.0"
 license = "MIT"
+repository = "https://github.com/aldanor/reactive-rs"
+keywords = ["reactive", "frp", "stream"]
 
 [dependencies]
 slice-deque = "0.1"
