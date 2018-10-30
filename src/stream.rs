@@ -15,20 +15,23 @@ pub trait Stream<'a> {
     }
 }
 
-type Observers<'a, T> = Rc<RefCell<Vec<Box<FnMut(&T) + 'a>>>>;
-
 pub struct Sink<'a, T> where T: ?Sized {
-    observers: Observers<'a, T>,
+    observers: Rc<RefCell<Vec<Box<FnMut(&T) + 'a>>>>,
 }
 
 impl<'a, T> Sink<'a, T> where T: ?Sized {
-    fn new(observers: Observers<'a, T>) -> Self {
-        Sink { observers }
+    fn new() -> Self {
+        Sink { observers: Rc::new(RefCell::new(Vec::new())) }
+    }
+
+    fn push<F>(&self, func: F) where F: FnMut(&T) + 'a {
+        self.observers.borrow_mut().push(Box::new(func));
     }
 
     pub fn feed<B>(&self, value: B) where B: Borrow<T> {
+        let value = value.borrow();
         for observer in self.observers.borrow_mut().iter_mut() {
-            observer(value.borrow() as &T);
+            observer(value);
         }
     }
 
@@ -39,46 +42,46 @@ impl<'a, T> Sink<'a, T> where T: ?Sized {
     }
 }
 
+impl<'a, T> Clone for Sink<'a, T> where T: ?Sized {
+    fn clone(&self) -> Self {
+        Sink { observers: self.observers.clone() }
+    }
+}
+
 pub struct Broadcast<'a, T: ?Sized> {
-    observers: Observers<'a, T>,
+    listeners: Sink<'a, T>,
 }
 
 impl<'a, T> Broadcast<'a, T> where T: 'a + ?Sized {
     pub fn new() -> Self {
-        Broadcast {
-            observers: Rc::new(RefCell::new(Vec::new())),
-        }
+        Broadcast { listeners: Sink::new() }
     }
 
     pub fn from_stream<S>(stream: S) -> Self
         where S: Stream<'a, Item=T>
     {
         let broadcast = Broadcast::new();
-        let observers = broadcast.observers.clone();
-        stream.subscribe(move |x: &T| {
-            for observer in observers.borrow_mut().iter_mut() {
-                observer(x);
-            }
-        });
+        let listeners = broadcast.listeners.clone();
+        stream.subscribe(move |x| listeners.feed(x));
         broadcast
     }
 
     pub fn sink(self) -> Sink<'a, T> {
-        Sink::new(self.observers)
+        self.listeners
     }
 
     pub fn listen(&self) -> Subscription<'a, T> {
-        Subscription::new(self.observers.clone())
+        Subscription::new(self.listeners.clone())
     }
 }
 
 pub struct Subscription<'a, T: ?Sized> {
-    observers: Observers<'a, T>,
+    listeners: Sink<'a, T>,
 }
 
 impl<'a, T: ?Sized> Subscription<'a, T> {
-    fn new(observers: Observers<'a, T>) -> Self {
-        Subscription { observers }
+    fn new(listeners: Sink<'a, T>) -> Self {
+        Subscription { listeners }
     }
 }
 
@@ -86,7 +89,7 @@ impl<'a, T> Stream<'a> for Subscription<'a, T> {
     type Item = T;
 
     fn subscribe<F>(self, f: F) where F: FnMut(&Self::Item) + 'a {
-        self.observers.borrow_mut().push(Box::new(f));
+        self.listeners.push(f);
     }
 }
 
