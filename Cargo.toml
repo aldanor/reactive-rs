@@ -1,0 +1,8 @@
+[package]
+name = "reactive"
+authors = ["Ivan Smirnov <i.s.smirnov@gmail.com>"]
+version = "0.1.0"
+license = "MIT"
+
+[dependencies]
+slice-deque = "0.1"
