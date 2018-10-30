@@ -8,20 +8,20 @@ use slice_deque::SliceDeque;
 pub trait Stream<'a> {
     type Item: ?Sized;
 
-    fn subscribe<F>(self, f: F) where F: FnMut(&Self::Item) + 'a;
+    fn subscribe<O>(self, observer: O) where O: 'a + FnMut(&Self::Item);
 
     fn fork(self) -> Broadcast<'a, Self::Item> where Self: 'a + Sized {
         Broadcast::from_stream(self)
     }
 }
 
-type Callback<'a, T> = Box<FnMut(&T) + 'a>;
+type Callback<'a, T> = Box<'a + FnMut(&T)>;
 
-pub struct Sink<'a, T> where T: ?Sized {
+pub struct Sink<'a, T: ?Sized> {
     observers: Rc<RefCell<Vec<Callback<'a, T>>>>,
 }
 
-impl<'a, T> Sink<'a, T> where T: ?Sized {
+impl<'a, T: ?Sized> Sink<'a, T> {
     fn new() -> Self {
         Sink { observers: Rc::new(RefCell::new(Vec::new())) }
     }
@@ -39,12 +39,12 @@ impl<'a, T> Sink<'a, T> where T: ?Sized {
 
     pub fn feed_iter<B, I>(&self, iter: I) where I: Iterator<Item=B>, B: Borrow<T> {
         for value in iter {
-            self.feed(value)
+            self.feed(value);
         }
     }
 }
 
-impl<'a, T> Clone for Sink<'a, T> where T: ?Sized {
+impl<'a, T: ?Sized> Clone for Sink<'a, T> {
     fn clone(&self) -> Self {
         Sink { observers: self.observers.clone() }
     }
@@ -96,8 +96,8 @@ impl<'a, T: ?Sized> Subscription<'a, T> {
 impl<'a, T> Stream<'a> for Subscription<'a, T> {
     type Item = T;
 
-    fn subscribe<F>(self, f: F) where F: FnMut(&Self::Item) + 'a {
-        self.listeners.push(f);
+    fn subscribe<O>(self, observer: O) where O: FnMut(&Self::Item) + 'a {
+        self.listeners.push(observer);
     }
 }
 
@@ -107,51 +107,45 @@ pub struct Map<S, M> {
 }
 
 impl<'a, S, M, T> Stream<'a> for Map<S, M>
-    where
-        S: Stream<'a>,
-        M: 'a + FnMut(&S::Item) -> T
+    where S: Stream<'a>, M: 'a + FnMut(&S::Item) -> T
 {
     type Item = T;
 
-    fn subscribe<F>(self, mut f: F) where F: FnMut(&Self::Item) + 'a {
+    fn subscribe<O>(self, mut observer: O) where O: FnMut(&Self::Item) + 'a {
         let mut func = self.func;
-        self.stream.subscribe(move |x| f(&func(x)))
+        self.stream.subscribe(move |x| observer(&func(x)))
     }
 }
 
-pub struct Filter<S, M> {
+pub struct Filter<S, F> {
     stream: S,
-    func: M,
+    func: F,
 }
 
-impl<'a, S, M> Stream<'a> for Filter<S, M>
-    where
-        S: Stream<'a>,
-        M: 'a + FnMut(&S::Item) -> bool
+impl<'a, S, F> Stream<'a> for Filter<S, F>
+    where S: Stream<'a>, F: 'a + FnMut(&S::Item) -> bool
 {
     type Item = S::Item;
 
-    fn subscribe<F>(self, mut f: F) where F: FnMut(&Self::Item) + 'a {
+    fn subscribe<O>(self, mut observer: O) where O: 'a + FnMut(&Self::Item) {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if func(x) { f(x) })
+        self.stream.subscribe(move |x| if func(x) { observer(x) });
     }
 }
 
-pub struct FilterMap<S, M> {
+pub struct FilterMap<S, F> {
     stream: S,
-    func: M,
+    func: F,
 }
 
-impl<'a, S, M, T> Stream<'a> for FilterMap<S, M>
-    where
-        S: Stream<'a>,
-        M: 'a + FnMut(&S::Item) -> Option<T>
+impl<'a, S, F, T> Stream<'a> for FilterMap<S, F>
+    where S: Stream<'a>, F: 'a + FnMut(&S::Item) -> Option<T>
 {
     type Item = T;
 
-    fn subscribe<F>(self, mut f: F) where F: FnMut(&Self::Item) + 'a {
+    fn subscribe<O>(self, mut observer: O) where O: 'a + FnMut(&Self::Item) {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if let Some(x) = func(x) { f(&x) })
+        self.stream.subscribe(move |x| if let Some(x) = func(x) { observer(&x) });
     }
 }
 
@@ -162,13 +156,11 @@ pub struct LastN<S, T: Sized> {
 }
 
 impl<'a, S, T> Stream<'a> for LastN<S, T>
-    where
-        S: Stream<'a, Item=T>,
-        T: 'a + Clone + Sized
+    where S: Stream<'a, Item=T>, T: 'a + Clone + Sized
 {
     type Item = [T];
 
-    fn subscribe<F>(self, mut f: F) where F: FnMut(&Self::Item) + 'a {
+    fn subscribe<O>(self, mut observer: O) where O: 'a + FnMut(&Self::Item) {
         let data = self.data.clone();
         let count = self.count;
         self.stream.subscribe(move |x| {
@@ -178,28 +170,32 @@ impl<'a, S, T> Stream<'a> for LastN<S, T>
             }
             queue.push_back(x.clone());
             drop(queue); // this is important, in order to avoid multiple mutable borrows
-            f(&*data.as_ref().borrow());
+            observer(&*data.as_ref().borrow());
         })
     }
 }
 
 pub trait StreamExt<'a>: Stream<'a> + Sized {
-    fn map<M, T>(self, func: M) -> Map<Self, M> where M: 'a + FnMut(&Self::Item) -> T {
+    fn map<F, T>(self, func: F) -> Map<Self, F>
+        where F: 'a + FnMut(&Self::Item) -> T
+    {
         Map {
             stream: self,
             func
         }
     }
 
-    fn filter<M, T>(self, func: M) -> Filter<Self, M> where M: 'a + FnMut(&Self::Item) -> T {
+    fn filter<F>(self, func: F) -> Filter<Self, F>
+        where F: 'a + FnMut(&Self::Item) -> bool
+    {
         Filter {
             stream: self,
             func
         }
     }
 
-    fn filter_map<M, T>(self, func: M) -> FilterMap<Self, M>
-        where M: 'a + FnMut(&Self::Item) -> Option<T>
+    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, F>
+        where F: 'a + FnMut(&Self::Item) -> Option<T>
     {
         FilterMap {
             stream: self,
@@ -207,7 +203,9 @@ pub trait StreamExt<'a>: Stream<'a> + Sized {
         }
     }
 
-    fn last_n(self, count: usize) -> LastN<Self, Self::Item> where Self::Item: Sized {
+    fn last_n(self, count: usize) -> LastN<Self, Self::Item>
+        where Self::Item: Sized
+    {
         LastN {
             count,
             stream: self,
