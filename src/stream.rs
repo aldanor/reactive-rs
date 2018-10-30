@@ -75,6 +75,12 @@ impl<'a, T> Broadcast<'a, T> where T: 'a + ?Sized {
     }
 }
 
+impl<'a, T> Default for Broadcast<'a, T> where T: 'a + ?Sized {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Subscription<'a, T: ?Sized> {
     listeners: Sink<'a, T>,
 }
