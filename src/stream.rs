@@ -15,8 +15,10 @@ pub trait Stream<'a> {
     }
 }
 
+type Callback<'a, T> = Box<FnMut(&T) + 'a>;
+
 pub struct Sink<'a, T> where T: ?Sized {
-    observers: Rc<RefCell<Vec<Box<FnMut(&T) + 'a>>>>,
+    observers: Rc<RefCell<Vec<Callback<'a, T>>>>,
 }
 
 impl<'a, T> Sink<'a, T> where T: ?Sized {
