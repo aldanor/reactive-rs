@@ -119,6 +119,24 @@ impl<'a, S, M, T> Stream<'a> for Map<S, M>
     }
 }
 
+pub struct Filter<S, M> {
+    stream: S,
+    func: M,
+}
+
+impl<'a, S, M> Stream<'a> for Filter<S, M>
+    where
+        S: Stream<'a>,
+        M: 'a + FnMut(&S::Item) -> bool
+{
+    type Item = S::Item;
+
+    fn subscribe<F>(self, mut f: F) where F: FnMut(&Self::Item) + 'a {
+        let mut func = self.func;
+        self.stream.subscribe(move |x| if func(x) { f(x) })
+    }
+}
+
 pub struct LastN<S, T: Sized> {
     count: usize,
     stream: S,
@@ -150,6 +168,13 @@ impl<'a, S, T> Stream<'a> for LastN<S, T>
 pub trait StreamExt<'a>: Stream<'a> + Sized {
     fn map<M, T>(self, func: M) -> Map<Self, M> where M: 'a + FnMut(&Self::Item) -> T {
         Map {
+            stream: self,
+            func
+        }
+    }
+
+    fn filter<M, T>(self, func: M) -> Filter<Self, M> where M: 'a + FnMut(&Self::Item) -> T {
+        Filter {
             stream: self,
             func
         }
