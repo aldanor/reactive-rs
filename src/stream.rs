@@ -12,7 +12,7 @@ pub trait Stream<'a> {
     where
         O: 'a + FnMut(&Self::Item);
 
-    fn fork(self) -> Broadcast<'a, Self::Item>
+    fn broadcast(self) -> Broadcast<'a, Self::Item>
     where
         Self: 'a + Sized,
     {
@@ -22,13 +22,26 @@ pub trait Stream<'a> {
 
 type Callback<'a, T> = Box<'a + FnMut(&T)>;
 
-pub struct Sink<'a, T: ?Sized> {
+pub struct Broadcast<'a, T: ?Sized> {
     observers: Rc<RefCell<Vec<Callback<'a, T>>>>,
 }
 
-impl<'a, T: ?Sized> Sink<'a, T> {
-    fn new() -> Self {
-        Sink { observers: Rc::new(RefCell::new(Vec::new())) }
+impl<'a, T> Broadcast<'a, T>
+where
+    T: 'a + ?Sized,
+{
+    pub fn new() -> Self {
+        Self { observers: Rc::new(RefCell::new(Vec::new())) }
+    }
+
+    pub fn from_stream<S>(stream: S) -> Self
+    where
+        S: Stream<'a, Item = T>,
+    {
+        let broadcast = Broadcast::new();
+        let clone = broadcast.clone();
+        stream.subscribe(move |x| clone.send(x));
+        broadcast
     }
 
     fn push<F>(&self, func: F)
@@ -59,43 +72,6 @@ impl<'a, T: ?Sized> Sink<'a, T> {
     }
 }
 
-impl<'a, T: ?Sized> Clone for Sink<'a, T> {
-    fn clone(&self) -> Self {
-        Sink { observers: self.observers.clone() }
-    }
-}
-
-pub struct Broadcast<'a, T: ?Sized> {
-    listeners: Sink<'a, T>,
-}
-
-impl<'a, T> Broadcast<'a, T>
-where
-    T: 'a + ?Sized,
-{
-    pub fn new() -> Self {
-        Broadcast { listeners: Sink::new() }
-    }
-
-    pub fn from_stream<S>(stream: S) -> Self
-    where
-        S: Stream<'a, Item = T>,
-    {
-        let broadcast = Broadcast::new();
-        let listeners = broadcast.listeners.clone();
-        stream.subscribe(move |x| listeners.send(x));
-        broadcast
-    }
-
-    pub fn sink(self) -> Sink<'a, T> {
-        self.listeners
-    }
-
-    pub fn listen(&self) -> Subscription<'a, T> {
-        Subscription::new(self.listeners.clone())
-    }
-}
-
 impl<'a, T> Default for Broadcast<'a, T>
 where
     T: 'a + ?Sized,
@@ -105,24 +81,27 @@ where
     }
 }
 
-pub struct Subscription<'a, T: ?Sized> {
-    listeners: Sink<'a, T>,
-}
-
-impl<'a, T: ?Sized> Subscription<'a, T> {
-    fn new(listeners: Sink<'a, T>) -> Self {
-        Subscription { listeners }
+impl<'a, T> Clone for Broadcast<'a, T>
+where
+    T: 'a + ?Sized,
+{
+    fn clone(&self) -> Self {
+        Self { observers: self.observers.clone() }
     }
 }
 
-impl<'a, T> Stream<'a> for Subscription<'a, T> {
+
+impl<'a, T> Stream<'a> for Broadcast<'a, T>
+where
+    T: 'a + ?Sized,
+{
     type Item = T;
 
     fn subscribe<O>(self, observer: O)
     where
         O: FnMut(&Self::Item) + 'a,
     {
-        self.listeners.push(observer);
+        self.push(observer);
     }
 }
 
