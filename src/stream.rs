@@ -8,9 +8,14 @@ use slice_deque::SliceDeque;
 pub trait Stream<'a> {
     type Item: ?Sized;
 
-    fn subscribe<O>(self, observer: O) where O: 'a + FnMut(&Self::Item);
+    fn subscribe<O>(self, observer: O)
+    where
+        O: 'a + FnMut(&Self::Item);
 
-    fn fork(self) -> Broadcast<'a, Self::Item> where Self: 'a + Sized {
+    fn fork(self) -> Broadcast<'a, Self::Item>
+    where
+        Self: 'a + Sized,
+    {
         Broadcast::from_stream(self)
     }
 }
@@ -26,18 +31,28 @@ impl<'a, T: ?Sized> Sink<'a, T> {
         Sink { observers: Rc::new(RefCell::new(Vec::new())) }
     }
 
-    fn push<F>(&self, func: F) where F: FnMut(&T) + 'a {
+    fn push<F>(&self, func: F)
+    where
+        F: FnMut(&T) + 'a,
+    {
         self.observers.borrow_mut().push(Box::new(func));
     }
 
-    pub fn send<B>(&self, value: B) where B: Borrow<T> {
+    pub fn send<B>(&self, value: B)
+    where
+        B: Borrow<T>,
+    {
         let value = value.borrow();
         for observer in self.observers.borrow_mut().iter_mut() {
             observer(value);
         }
     }
 
-    pub fn feed<B, I>(&self, iter: I) where I: Iterator<Item=B>, B: Borrow<T> {
+    pub fn feed<B, I>(&self, iter: I)
+    where
+        I: Iterator<Item = B>,
+        B: Borrow<T>,
+    {
         for value in iter {
             self.send(value);
         }
@@ -54,13 +69,17 @@ pub struct Broadcast<'a, T: ?Sized> {
     listeners: Sink<'a, T>,
 }
 
-impl<'a, T> Broadcast<'a, T> where T: 'a + ?Sized {
+impl<'a, T> Broadcast<'a, T>
+where
+    T: 'a + ?Sized,
+{
     pub fn new() -> Self {
         Broadcast { listeners: Sink::new() }
     }
 
     pub fn from_stream<S>(stream: S) -> Self
-        where S: Stream<'a, Item=T>
+    where
+        S: Stream<'a, Item = T>,
     {
         let broadcast = Broadcast::new();
         let listeners = broadcast.listeners.clone();
@@ -77,7 +96,10 @@ impl<'a, T> Broadcast<'a, T> where T: 'a + ?Sized {
     }
 }
 
-impl<'a, T> Default for Broadcast<'a, T> where T: 'a + ?Sized {
+impl<'a, T> Default for Broadcast<'a, T>
+where
+    T: 'a + ?Sized,
+{
     fn default() -> Self {
         Self::new()
     }
@@ -96,7 +118,10 @@ impl<'a, T: ?Sized> Subscription<'a, T> {
 impl<'a, T> Stream<'a> for Subscription<'a, T> {
     type Item = T;
 
-    fn subscribe<O>(self, observer: O) where O: FnMut(&Self::Item) + 'a {
+    fn subscribe<O>(self, observer: O)
+    where
+        O: FnMut(&Self::Item) + 'a,
+    {
         self.listeners.push(observer);
     }
 }
@@ -107,11 +132,16 @@ pub struct Map<S, M> {
 }
 
 impl<'a, S, M, T> Stream<'a> for Map<S, M>
-    where S: Stream<'a>, M: 'a + FnMut(&S::Item) -> T
+where
+    S: Stream<'a>,
+    M: 'a + FnMut(&S::Item) -> T,
 {
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O) where O: FnMut(&Self::Item) + 'a {
+    fn subscribe<O>(self, mut observer: O)
+    where
+        O: FnMut(&Self::Item) + 'a,
+    {
         let mut func = self.func;
         self.stream.subscribe(move |x| observer(&func(x)))
     }
@@ -123,13 +153,20 @@ pub struct Filter<S, F> {
 }
 
 impl<'a, S, F> Stream<'a> for Filter<S, F>
-    where S: Stream<'a>, F: 'a + FnMut(&S::Item) -> bool
+where
+    S: Stream<'a>,
+    F: 'a + FnMut(&S::Item) -> bool,
 {
     type Item = S::Item;
 
-    fn subscribe<O>(self, mut observer: O) where O: 'a + FnMut(&Self::Item) {
+    fn subscribe<O>(self, mut observer: O)
+    where
+        O: 'a + FnMut(&Self::Item),
+    {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if func(x) { observer(x) });
+        self.stream.subscribe(move |x| if func(x) {
+            observer(x);
+        });
     }
 }
 
@@ -139,13 +176,20 @@ pub struct FilterMap<S, F> {
 }
 
 impl<'a, S, F, T> Stream<'a> for FilterMap<S, F>
-    where S: Stream<'a>, F: 'a + FnMut(&S::Item) -> Option<T>
+where
+    S: Stream<'a>,
+    F: 'a + FnMut(&S::Item) -> Option<T>,
 {
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O) where O: 'a + FnMut(&Self::Item) {
+    fn subscribe<O>(self, mut observer: O)
+    where
+        O: 'a + FnMut(&Self::Item),
+    {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if let Some(x) = func(x) { observer(&x) });
+        self.stream.subscribe(move |x| if let Some(x) = func(x) {
+            observer(&x);
+        });
     }
 }
 
@@ -156,11 +200,16 @@ pub struct LastN<S, T: Sized> {
 }
 
 impl<'a, S, T> Stream<'a> for LastN<S, T>
-    where S: Stream<'a, Item=T>, T: 'a + Clone + Sized
+where
+    S: Stream<'a, Item = T>,
+    T: 'a + Clone + Sized,
 {
     type Item = [T];
 
-    fn subscribe<O>(self, mut observer: O) where O: 'a + FnMut(&Self::Item) {
+    fn subscribe<O>(self, mut observer: O)
+    where
+        O: 'a + FnMut(&Self::Item),
+    {
         let data = self.data.clone();
         let count = self.count;
         self.stream.subscribe(move |x| {
@@ -177,41 +226,40 @@ impl<'a, S, T> Stream<'a> for LastN<S, T>
 
 pub trait StreamExt<'a>: Stream<'a> + Sized {
     fn map<F, T>(self, func: F) -> Map<Self, F>
-        where F: 'a + FnMut(&Self::Item) -> T
+    where
+        F: 'a + FnMut(&Self::Item) -> T,
     {
-        Map {
-            stream: self,
-            func
-        }
+        Map { stream: self, func }
     }
 
     fn filter<F>(self, func: F) -> Filter<Self, F>
-        where F: 'a + FnMut(&Self::Item) -> bool
+    where
+        F: 'a + FnMut(&Self::Item) -> bool,
     {
-        Filter {
-            stream: self,
-            func
-        }
+        Filter { stream: self, func }
     }
 
     fn filter_map<F, T>(self, func: F) -> FilterMap<Self, F>
-        where F: 'a + FnMut(&Self::Item) -> Option<T>
+    where
+        F: 'a + FnMut(&Self::Item) -> Option<T>,
     {
-        FilterMap {
-            stream: self,
-            func
-        }
+        FilterMap { stream: self, func }
     }
 
     fn last_n(self, count: usize) -> LastN<Self, Self::Item>
-        where Self::Item: Sized
+    where
+        Self::Item: Sized,
     {
         LastN {
             count,
             stream: self,
-            data: Rc::new(RefCell::new(SliceDeque::with_capacity(count)))
+            data: Rc::new(RefCell::new(SliceDeque::with_capacity(count))),
         }
     }
 }
 
-impl<'a, S: Stream<'a>> StreamExt<'a> for S where S: Stream<'a> {}
+impl<'a, S: Stream<'a>> StreamExt<'a> for S
+where
+    S: Stream<'a>,
+{
+}
