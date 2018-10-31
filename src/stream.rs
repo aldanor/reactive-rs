@@ -30,16 +30,16 @@ impl<'a, T: ?Sized> Sink<'a, T> {
         self.observers.borrow_mut().push(Box::new(func));
     }
 
-    pub fn feed<B>(&self, value: B) where B: Borrow<T> {
+    pub fn send<B>(&self, value: B) where B: Borrow<T> {
         let value = value.borrow();
         for observer in self.observers.borrow_mut().iter_mut() {
             observer(value);
         }
     }
 
-    pub fn feed_iter<B, I>(&self, iter: I) where I: Iterator<Item=B>, B: Borrow<T> {
+    pub fn feed<B, I>(&self, iter: I) where I: Iterator<Item=B>, B: Borrow<T> {
         for value in iter {
-            self.feed(value);
+            self.send(value);
         }
     }
 }
@@ -64,7 +64,7 @@ impl<'a, T> Broadcast<'a, T> where T: 'a + ?Sized {
     {
         let broadcast = Broadcast::new();
         let listeners = broadcast.listeners.clone();
-        stream.subscribe(move |x| listeners.feed(x));
+        stream.subscribe(move |x| listeners.send(x));
         broadcast
     }
 
