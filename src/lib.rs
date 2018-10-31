@@ -1,3 +1,7 @@
+#![crate_type = "lib"]
+
 extern crate slice_deque;
 
-pub mod stream;
+pub use stream::{Broadcast, Stream, StreamExt};
+
+mod stream;
