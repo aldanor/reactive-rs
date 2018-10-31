@@ -105,15 +105,15 @@ where
     }
 }
 
-pub struct Map<S, M> {
+pub struct Map<S, F> {
     stream: S,
-    func: M,
+    func: F,
 }
 
-impl<'a, S, M, T> Stream<'a> for Map<S, M>
+impl<'a, S, F, T> Stream<'a> for Map<S, F>
 where
     S: Stream<'a>,
-    M: 'a + FnMut(&S::Item) -> T,
+    F: 'a + FnMut(&S::Item) -> T,
 {
     type Item = T;
 
