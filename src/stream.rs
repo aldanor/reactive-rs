@@ -172,6 +172,33 @@ where
     }
 }
 
+pub struct Fold<S, F, T> {
+    stream: S,
+    func: F,
+    value: T,
+}
+
+impl<'a, S, F, T> Stream<'a> for Fold<S, F, T>
+    where
+        S: Stream<'a>,
+        F: 'a + FnMut(&T, &S::Item) -> T,
+        T: 'a,
+{
+    type Item = T;
+
+    fn subscribe<O>(self, mut observer: O)
+        where
+            O: FnMut(&Self::Item) + 'a,
+    {
+        let mut func = self.func;
+        let mut value = self.value;
+        self.stream.subscribe(move |x| {
+            value = func(&value, x);
+            observer(&value);
+        })
+    }
+}
+
 pub struct Inspect<S, F> {
     stream: S,
     func: F,
@@ -249,13 +276,20 @@ pub trait StreamExt<'a>: Stream<'a> + Sized {
         FilterMap { stream: self, func }
     }
 
+    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
+        where
+            F: 'a + FnMut(&T, &Self::Item) -> T,
+            T: 'a,
+    {
+        Fold { stream: self, func, value: init }
+    }
+
     fn inspect<F, T>(self, func: F) -> Inspect<Self, F>
     where
         F: 'a + FnMut(&Self::Item),
     {
         Inspect { stream: self, func }
     }
-
 
     fn last_n(self, count: usize) -> LastN<Self, Self::Item>
     where
