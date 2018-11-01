@@ -14,9 +14,56 @@ pub trait Stream<'a>: Sized {
 
     fn broadcast(self) -> Broadcast<'a, Self::Item>
     where
-        Self: 'a + Sized,
+        Self: 'a,
     {
         Broadcast::from_stream(self)
+    }
+
+    fn map<F, T>(self, func: F) -> Map<Self, F>
+        where
+            F: 'a + FnMut(&Self::Item) -> T,
+    {
+        Map { stream: self, func }
+    }
+
+    fn filter<F>(self, func: F) -> Filter<Self, F>
+        where
+            F: 'a + FnMut(&Self::Item) -> bool,
+    {
+        Filter { stream: self, func }
+    }
+
+    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, F>
+        where
+            F: 'a + FnMut(&Self::Item) -> Option<T>,
+    {
+        FilterMap { stream: self, func }
+    }
+
+    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
+        where
+            F: 'a + FnMut(&T, &Self::Item) -> T,
+            T: 'a,
+    {
+        Fold { stream: self, func, value: init }
+    }
+
+    fn inspect<F, T>(self, func: F) -> Inspect<Self, F>
+        where
+            F: 'a + FnMut(&Self::Item),
+    {
+        Inspect { stream: self, func }
+    }
+
+    fn last_n(self, count: usize) -> LastN<Self, Self::Item>
+        where
+            Self::Item: Sized,
+    {
+        LastN {
+            count,
+            stream: self,
+            data: Rc::new(RefCell::new(SliceDeque::with_capacity(count))),
+        }
     }
 }
 
@@ -89,7 +136,6 @@ where
         Self { observers: self.observers.clone() }
     }
 }
-
 
 impl<'a, T> Stream<'a> for Broadcast<'a, T>
 where
@@ -252,59 +298,4 @@ where
             observer(&*data.as_ref().borrow());
         })
     }
-}
-
-pub trait StreamExt<'a>: Stream<'a> + Sized {
-    fn map<F, T>(self, func: F) -> Map<Self, F>
-    where
-        F: 'a + FnMut(&Self::Item) -> T,
-    {
-        Map { stream: self, func }
-    }
-
-    fn filter<F>(self, func: F) -> Filter<Self, F>
-    where
-        F: 'a + FnMut(&Self::Item) -> bool,
-    {
-        Filter { stream: self, func }
-    }
-
-    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, F>
-    where
-        F: 'a + FnMut(&Self::Item) -> Option<T>,
-    {
-        FilterMap { stream: self, func }
-    }
-
-    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
-        where
-            F: 'a + FnMut(&T, &Self::Item) -> T,
-            T: 'a,
-    {
-        Fold { stream: self, func, value: init }
-    }
-
-    fn inspect<F, T>(self, func: F) -> Inspect<Self, F>
-    where
-        F: 'a + FnMut(&Self::Item),
-    {
-        Inspect { stream: self, func }
-    }
-
-    fn last_n(self, count: usize) -> LastN<Self, Self::Item>
-    where
-        Self::Item: Sized,
-    {
-        LastN {
-            count,
-            stream: self,
-            data: Rc::new(RefCell::new(SliceDeque::with_capacity(count))),
-        }
-    }
-}
-
-impl<'a, S: Stream<'a>> StreamExt<'a> for S
-where
-    S: Stream<'a>,
-{
 }
