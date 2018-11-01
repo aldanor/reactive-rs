@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use slice_deque::SliceDeque;
 
-pub trait Stream<'a> {
+pub trait Stream<'a>: Sized {
     type Item: ?Sized;
 
     fn subscribe<O>(self, observer: O)
