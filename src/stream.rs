@@ -6,17 +6,25 @@ use std::rc::Rc;
 use slice_deque::SliceDeque;
 
 pub trait Stream<'a>: Sized {
+    type Context: ?Sized;
     type Item: ?Sized;
 
-    fn subscribe<O>(self, observer: O)
+    fn subscribe_ctx<O>(self, observer: O)
     where
-        O: 'a + FnMut(&Self::Item);
+        O: 'a + FnMut(&Self::Context, &Self::Item);
 
-    fn broadcast(self) -> Broadcast<'a, Self::Item>
+    fn subscribe<O>(self, mut observer: O)
+    where
+        O: 'a + FnMut(&Self::Item),
+    {
+        self.subscribe_ctx(move |_ctx, item| observer(item))
+    }
+
+    fn broadcast(self) -> ContextBroadcast<'a, Self::Context, Self::Item>
     where
         Self: 'a,
     {
-        Broadcast::from_stream(self)
+        ContextBroadcast::from_stream(self)
     }
 
     fn map<F, T>(self, func: F) -> Map<Self, F>
@@ -71,14 +79,15 @@ pub trait Stream<'a>: Sized {
     }
 }
 
-type Callback<'a, T> = Box<'a + FnMut(&T)>;
+type Callback<'a, C, T> = Box<'a + FnMut(&C, &T)>;
 
-pub struct Broadcast<'a, T: ?Sized> {
-    observers: Rc<RefCell<Vec<Callback<'a, T>>>>,
+pub struct ContextBroadcast<'a, C: ?Sized, T: ?Sized> {
+    observers: Rc<RefCell<Vec<Callback<'a, C, T>>>>,
 }
 
-impl<'a, T> Broadcast<'a, T>
+impl<'a, C, T> ContextBroadcast<'a, C, T>
 where
+    C: 'a + ?Sized,
     T: 'a + ?Sized,
 {
     pub fn new() -> Self {
@@ -87,28 +96,51 @@ where
 
     pub fn from_stream<S>(stream: S) -> Self
     where
-        S: Stream<'a, Item = T>,
+        S: Stream<'a, Context = C, Item = T>,
     {
-        let broadcast = Broadcast::new();
+        let broadcast = Self::new();
         let clone = broadcast.clone();
-        stream.subscribe(move |x| clone.send(x));
+        stream.subscribe_ctx(move |ctx, x| clone.send_ctx(ctx, x));
         broadcast
     }
 
     fn push<F>(&self, func: F)
     where
-        F: FnMut(&T) + 'a,
+        F: FnMut(&C, &T) + 'a,
     {
         self.observers.borrow_mut().push(Box::new(func));
+    }
+
+    pub fn send_ctx<K, B>(&self, ctx: K, value: B)
+    where
+        K: Borrow<C>,
+        B: Borrow<T>,
+    {
+        let ctx = ctx.borrow();
+        let value = value.borrow();
+        for observer in self.observers.borrow_mut().iter_mut() {
+            observer(ctx, value);
+        }
     }
 
     pub fn send<B>(&self, value: B)
     where
         B: Borrow<T>,
+        C: Default,
     {
-        let value = value.borrow();
-        for observer in self.observers.borrow_mut().iter_mut() {
-            observer(value);
+        let ctx = C::default();
+        self.send_ctx(&ctx, value);
+    }
+
+    pub fn feed_ctx<K, B, I>(&self, ctx: K, iter: I)
+    where
+        K: Borrow<C>,
+        I: Iterator<Item = B>,
+        B: Borrow<T>,
+    {
+        let ctx = ctx.borrow();
+        for value in iter {
+            self.send_ctx(ctx, value);
         }
     }
 
@@ -116,15 +148,18 @@ where
     where
         I: Iterator<Item = B>,
         B: Borrow<T>,
+        C: Default,
     {
-        for value in iter {
-            self.send(value);
-        }
+        let ctx = C::default();
+        self.feed_ctx(&ctx, iter);
     }
 }
 
-impl<'a, T> Default for Broadcast<'a, T>
+pub type Broadcast<'a, T> = ContextBroadcast<'a, (), T>;
+
+impl<'a, C, T> Default for ContextBroadcast<'a, C, T>
 where
+    C: 'a + ?Sized,
     T: 'a + ?Sized,
 {
     fn default() -> Self {
@@ -132,8 +167,9 @@ where
     }
 }
 
-impl<'a, T> Clone for Broadcast<'a, T>
+impl<'a, C, T> Clone for ContextBroadcast<'a, C, T>
 where
+    C: 'a + ?Sized,
     T: 'a + ?Sized,
 {
     fn clone(&self) -> Self {
@@ -141,15 +177,17 @@ where
     }
 }
 
-impl<'a, T> Stream<'a> for Broadcast<'a, T>
+impl<'a, C, T> Stream<'a> for ContextBroadcast<'a, C, T>
 where
+    C: 'a + ?Sized,
     T: 'a + ?Sized,
 {
+    type Context = C;
     type Item = T;
 
-    fn subscribe<O>(self, observer: O)
+    fn subscribe_ctx<O>(self, observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         self.push(observer);
     }
@@ -165,14 +203,17 @@ where
     S: Stream<'a>,
     F: 'a + FnMut(&S::Item) -> T,
 {
+    type Context = S::Context;
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| observer(&func(x)))
+        self.stream.subscribe_ctx(
+            move |ctx, x| observer(ctx, &func(x)),
+        )
     }
 }
 
@@ -186,15 +227,16 @@ where
     S: Stream<'a>,
     F: 'a + FnMut(&S::Item) -> bool,
 {
+    type Context = S::Context;
     type Item = S::Item;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: 'a + FnMut(&Self::Item),
+        O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if func(x) {
-            observer(x);
+        self.stream.subscribe_ctx(move |ctx, x| if func(x) {
+            observer(ctx, x);
         });
     }
 }
@@ -209,16 +251,19 @@ where
     S: Stream<'a>,
     F: 'a + FnMut(&S::Item) -> Option<T>,
 {
+    type Context = S::Context;
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: 'a + FnMut(&Self::Item),
+        O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if let Some(x) = func(x) {
-            observer(&x);
-        });
+        self.stream.subscribe_ctx(
+            move |ctx, x| if let Some(x) = func(x) {
+                observer(ctx, &x);
+            },
+        );
     }
 }
 
@@ -234,17 +279,18 @@ where
     F: 'a + FnMut(&T, &S::Item) -> T,
     T: 'a,
 {
+    type Context = S::Context;
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
         let mut value = self.value;
-        self.stream.subscribe(move |x| {
+        self.stream.subscribe_ctx(move |ctx, x| {
             value = func(&value, x);
-            observer(&value);
+            observer(ctx, &value);
         })
     }
 }
@@ -259,16 +305,17 @@ where
     S: Stream<'a>,
     F: 'a + FnMut(&S::Item),
 {
+    type Context = S::Context;
     type Item = S::Item;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| {
+        self.stream.subscribe_ctx(move |ctx, x| {
             func(x);
-            observer(x);
+            observer(ctx, x);
         })
     }
 }
@@ -284,22 +331,23 @@ where
     S: Stream<'a, Item = T>,
     T: 'a + Clone + Sized,
 {
+    type Context = S::Context;
     type Item = [T];
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: 'a + FnMut(&Self::Item),
+        O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let data = self.data.clone();
         let count = self.count;
-        self.stream.subscribe(move |x| {
+        self.stream.subscribe_ctx(move |ctx, x| {
             let mut queue = data.borrow_mut();
             if queue.len() == count {
                 queue.pop_front();
             }
             queue.push_back(x.clone());
             drop(queue); // this is important, in order to avoid multiple mutable borrows
-            observer(&*data.as_ref().borrow());
+            observer(ctx, &*data.as_ref().borrow());
         })
     }
 }
