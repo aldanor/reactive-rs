@@ -31,6 +31,10 @@ pub trait Stream<'a>: Sized {
         Context { stream: self }
     }
 
+    fn with_ctx<T>(self, ctx: T) -> WithContext<Self, T> {
+        WithContext { stream: self, ctx }
+    }
+
     fn map_ctx<F, T>(self, func: F) -> Map<Self, F>
     where
         F: 'a + FnMut(&Self::Context, &Self::Item) -> T,
@@ -322,6 +326,30 @@ where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         self.push(observer);
+    }
+}
+
+pub struct WithContext<S, T> {
+    stream: S,
+    ctx: T,
+}
+
+impl<'a, S, T> Stream<'a> for WithContext<S, T>
+where
+    S: Stream<'a>,
+    T: 'a,
+{
+    type Context = T;
+    type Item = S::Item;
+
+    fn subscribe_ctx<O>(self, mut observer: O)
+    where
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
+    {
+        let ctx = self.ctx;
+        self.stream.subscribe_ctx(
+            move |_ctx, x| { observer(&ctx, x); },
+        )
     }
 }
 
