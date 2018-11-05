@@ -27,30 +27,60 @@ pub trait Stream<'a>: Sized {
         ContextBroadcast::from_stream(self)
     }
 
-    fn map<F, T>(self, func: F) -> Map<Self, F>
+    fn map_ctx<F, T>(self, func: F) -> Map<Self, F>
     where
-        F: 'a + FnMut(&Self::Item) -> T,
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> T,
     {
         Map { stream: self, func }
     }
 
-    fn filter<F>(self, func: F) -> Filter<Self, F>
+    fn map<F, T>(self, func: F) -> Map<Self, NoContext<F>>
     where
-        F: 'a + FnMut(&Self::Item) -> bool,
+        F: 'a + FnMut(&Self::Item) -> T,
+    {
+        Map {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn filter_ctx<F>(self, func: F) -> Filter<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> bool,
     {
         Filter { stream: self, func }
     }
 
-    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, F>
+    fn filter<F>(self, func: F) -> Filter<Self, NoContext<F>>
     where
-        F: 'a + FnMut(&Self::Item) -> Option<T>,
+        F: 'a + FnMut(&Self::Item) -> bool,
+    {
+        Filter {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn filter_map_ctx<F, T>(self, func: F) -> FilterMap<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> Option<T>,
     {
         FilterMap { stream: self, func }
     }
 
-    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
+    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, NoContext<F>>
     where
-        F: 'a + FnMut(&T, &Self::Item) -> T,
+        F: 'a + FnMut(&Self::Item) -> Option<T>,
+    {
+        FilterMap {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn fold_ctx<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
+    where
+        F: 'a + FnMut(&Self::Context, &T, &Self::Item) -> T,
         T: 'a,
     {
         Fold {
@@ -60,11 +90,33 @@ pub trait Stream<'a>: Sized {
         }
     }
 
-    fn inspect<F, T>(self, func: F) -> Inspect<Self, F>
+    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, NoContext<F>, T>
+    where
+        F: 'a + FnMut(&T, &Self::Item) -> T,
+        T: 'a,
+    {
+        Fold {
+            stream: self,
+            func: NoContext(func),
+            value: init,
+        }
+    }
+
+    fn inspect_ctx<F, T>(self, func: F) -> Inspect<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item),
+    {
+        Inspect { stream: self, func }
+    }
+
+    fn inspect<F, T>(self, func: F) -> Inspect<Self, NoContext<F>>
     where
         F: 'a + FnMut(&Self::Item),
     {
-        Inspect { stream: self, func }
+        Inspect {
+            stream: self,
+            func: NoContext(func),
+        }
     }
 
     fn last_n(self, count: usize) -> LastN<Self, Self::Item>
@@ -76,6 +128,82 @@ pub trait Stream<'a>: Sized {
             stream: self,
             data: Rc::new(RefCell::new(SliceDeque::with_capacity(count))),
         }
+    }
+}
+
+pub trait ContextFn<C, T>
+where
+    C: ?Sized,
+    T: ?Sized,
+{
+    type Output;
+
+    fn call_mut(&mut self, ctx: &C, item: &T) -> Self::Output;
+}
+
+impl<C, T, V> ContextFn<C, T> for FnMut(&C, &T) -> V
+where
+    C: ?Sized,
+    T: ?Sized,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, ctx: &C, item: &T) -> Self::Output {
+        self(ctx, item)
+    }
+}
+
+pub trait ContextFoldFn<C, T, V>
+where
+    C: ?Sized,
+    T: ?Sized,
+{
+    type Output;
+
+    fn call_mut(&mut self, ctx: &C, acc: &V, item: &T) -> Self::Output;
+}
+
+impl<C, T, V> ContextFoldFn<C, T, V> for FnMut(&C, &V, &T) -> V
+where
+    C: ?Sized,
+    T: ?Sized,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, ctx: &C, acc: &V, item: &T) -> Self::Output {
+        self(ctx, acc, item)
+    }
+}
+
+pub struct NoContext<F>(F);
+
+impl<F, C, T, V> ContextFn<C, T> for NoContext<F>
+where
+    F: FnMut(&T) -> V,
+    C: ?Sized,
+    T: ?Sized,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, _ctx: &C, item: &T) -> Self::Output {
+        (self.0)(item)
+    }
+}
+
+impl<F, C, T, V> ContextFoldFn<C, T, V> for NoContext<F>
+where
+    F: FnMut(&V, &T) -> V,
+    C: ?Sized,
+    T: ?Sized,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, _ctx: &C, acc: &Self::Output, item: &T) -> Self::Output {
+        (self.0)(acc, item)
     }
 }
 
@@ -198,22 +326,22 @@ pub struct Map<S, F> {
     func: F,
 }
 
-impl<'a, S, F, T> Stream<'a> for Map<S, F>
+impl<'a, S, F> Stream<'a> for Map<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item) -> T,
+    F: 'a + ContextFn<S::Context, S::Item>,
 {
     type Context = S::Context;
-    type Item = T;
+    type Item = F::Output;
 
     fn subscribe_ctx<O>(self, mut observer: O)
     where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe_ctx(
-            move |ctx, x| observer(ctx, &func(x)),
-        )
+        self.stream.subscribe_ctx(move |ctx, x| {
+            observer(ctx, &func.call_mut(ctx, x))
+        })
     }
 }
 
@@ -225,7 +353,7 @@ pub struct Filter<S, F> {
 impl<'a, S, F> Stream<'a> for Filter<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item) -> bool,
+    F: 'a + ContextFn<S::Context, S::Item, Output = bool>,
 {
     type Context = S::Context;
     type Item = S::Item;
@@ -235,9 +363,11 @@ where
         O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe_ctx(move |ctx, x| if func(x) {
-            observer(ctx, x);
-        });
+        self.stream.subscribe_ctx(
+            move |ctx, x| if func.call_mut(ctx, x) {
+                observer(ctx, x);
+            },
+        );
     }
 }
 
@@ -249,7 +379,7 @@ pub struct FilterMap<S, F> {
 impl<'a, S, F, T> Stream<'a> for FilterMap<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item) -> Option<T>,
+    F: 'a + ContextFn<S::Context, S::Item, Output = Option<T>>,
 {
     type Context = S::Context;
     type Item = T;
@@ -260,7 +390,7 @@ where
     {
         let mut func = self.func;
         self.stream.subscribe_ctx(
-            move |ctx, x| if let Some(x) = func(x) {
+            move |ctx, x| if let Some(x) = func.call_mut(ctx, x) {
                 observer(ctx, &x);
             },
         );
@@ -276,7 +406,7 @@ pub struct Fold<S, F, T> {
 impl<'a, S, F, T> Stream<'a> for Fold<S, F, T>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&T, &S::Item) -> T,
+    F: 'a + ContextFoldFn<S::Context, S::Item, T, Output = T>,
     T: 'a,
 {
     type Context = S::Context;
@@ -289,7 +419,7 @@ where
         let mut func = self.func;
         let mut value = self.value;
         self.stream.subscribe_ctx(move |ctx, x| {
-            value = func(&value, x);
+            value = func.call_mut(ctx, &value, x);
             observer(ctx, &value);
         })
     }
@@ -303,7 +433,7 @@ pub struct Inspect<S, F> {
 impl<'a, S, F> Stream<'a> for Inspect<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item),
+    F: 'a + ContextFn<S::Context, S::Item, Output = ()>,
 {
     type Context = S::Context;
     type Item = S::Item;
@@ -314,7 +444,7 @@ where
     {
         let mut func = self.func;
         self.stream.subscribe_ctx(move |ctx, x| {
-            func(x);
+            func.call_mut(ctx, x);
             observer(ctx, x);
         })
     }
