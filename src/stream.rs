@@ -111,10 +111,9 @@ pub trait Stream<'a>: Sized {
         }
     }
 
-    fn fold_ctx<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
+    fn fold_ctx<F, T: 'a>(self, func: F, init: T) -> Fold<Self, F, T>
     where
         F: 'a + FnMut(&Self::Context, &T, &Self::Item) -> T,
-        T: 'a,
     {
         Fold {
             stream: self,
@@ -123,10 +122,9 @@ pub trait Stream<'a>: Sized {
         }
     }
 
-    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, NoContext<F>, T>
+    fn fold<F, T: 'a>(self, func: F, init: T) -> Fold<Self, NoContext<F>, T>
     where
         F: 'a + FnMut(&T, &Self::Item) -> T,
-        T: 'a,
     {
         Fold {
             stream: self,
@@ -165,21 +163,13 @@ pub trait Stream<'a>: Sized {
     }
 }
 
-pub trait ContextFn<C, T>
-where
-    C: ?Sized,
-    T: ?Sized,
-{
+pub trait ContextFn<C: ?Sized, T: ?Sized> {
     type Output;
 
     fn call_mut(&mut self, ctx: &C, item: &T) -> Self::Output;
 }
 
-impl<C, T, V> ContextFn<C, T> for FnMut(&C, &T) -> V
-where
-    C: ?Sized,
-    T: ?Sized,
-{
+impl<C: ?Sized, T: ?Sized, V> ContextFn<C, T> for FnMut(&C, &T) -> V {
     type Output = V;
 
     #[inline(always)]
@@ -188,21 +178,13 @@ where
     }
 }
 
-pub trait ContextFoldFn<C, T, V>
-where
-    C: ?Sized,
-    T: ?Sized,
-{
+pub trait ContextFoldFn<C: ?Sized, T: ?Sized, V> {
     type Output;
 
     fn call_mut(&mut self, ctx: &C, acc: &V, item: &T) -> Self::Output;
 }
 
-impl<C, T, V> ContextFoldFn<C, T, V> for FnMut(&C, &V, &T) -> V
-where
-    C: ?Sized,
-    T: ?Sized,
-{
+impl<C: ?Sized, T: ?Sized, V> ContextFoldFn<C, T, V> for FnMut(&C, &V, &T) -> V {
     type Output = V;
 
     #[inline(always)]
@@ -213,11 +195,9 @@ where
 
 pub struct NoContext<F>(F);
 
-impl<F, C, T, V> ContextFn<C, T> for NoContext<F>
+impl<F, C: ?Sized, T: ?Sized, V> ContextFn<C, T> for NoContext<F>
 where
     F: FnMut(&T) -> V,
-    C: ?Sized,
-    T: ?Sized,
 {
     type Output = V;
 
@@ -227,11 +207,9 @@ where
     }
 }
 
-impl<F, C, T, V> ContextFoldFn<C, T, V> for NoContext<F>
+impl<F, C: ?Sized, T: ?Sized, V> ContextFoldFn<C, T, V> for NoContext<F>
 where
     F: FnMut(&V, &T) -> V,
-    C: ?Sized,
-    T: ?Sized,
 {
     type Output = V;
 
@@ -247,11 +225,7 @@ pub struct ContextBroadcast<'a, C: ?Sized, T: ?Sized> {
     observers: Rc<RefCell<Vec<Callback<'a, C, T>>>>,
 }
 
-impl<'a, C, T> ContextBroadcast<'a, C, T>
-where
-    C: 'a + ?Sized,
-    T: 'a + ?Sized,
-{
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> ContextBroadcast<'a, C, T> {
     pub fn new() -> Self {
         Self { observers: Rc::new(RefCell::new(Vec::new())) }
     }
@@ -319,31 +293,19 @@ where
 
 pub type Broadcast<'a, T> = ContextBroadcast<'a, (), T>;
 
-impl<'a, C, T> Default for ContextBroadcast<'a, C, T>
-where
-    C: 'a + ?Sized,
-    T: 'a + ?Sized,
-{
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Default for ContextBroadcast<'a, C, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, C, T> Clone for ContextBroadcast<'a, C, T>
-where
-    C: 'a + ?Sized,
-    T: 'a + ?Sized,
-{
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Clone for ContextBroadcast<'a, C, T> {
     fn clone(&self) -> Self {
         Self { observers: self.observers.clone() }
     }
 }
 
-impl<'a, C, T> Stream<'a> for ContextBroadcast<'a, C, T>
-where
-    C: 'a + ?Sized,
-    T: 'a + ?Sized,
-{
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Stream<'a> for ContextBroadcast<'a, C, T> {
     type Context = C;
     type Item = T;
 
@@ -360,10 +322,9 @@ pub struct WithContext<S, T> {
     ctx: T,
 }
 
-impl<'a, S, T> Stream<'a> for WithContext<S, T>
+impl<'a, S, T: 'a> Stream<'a> for WithContext<S, T>
 where
     S: Stream<'a>,
-    T: 'a,
 {
     type Context = T;
     type Item = S::Item;
@@ -531,11 +492,10 @@ pub struct Fold<S, F, T> {
     value: T,
 }
 
-impl<'a, S, F, T> Stream<'a> for Fold<S, F, T>
+impl<'a, S, F, T: 'a> Stream<'a> for Fold<S, F, T>
 where
     S: Stream<'a>,
     F: 'a + ContextFoldFn<S::Context, S::Item, T, Output = T>,
-    T: 'a,
 {
     type Context = S::Context;
     type Item = T;
