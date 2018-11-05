@@ -169,7 +169,10 @@ pub trait ContextFn<C: ?Sized, T: ?Sized> {
     fn call_mut(&mut self, ctx: &C, item: &T) -> Self::Output;
 }
 
-impl<C: ?Sized, T: ?Sized, V> ContextFn<C, T> for FnMut(&C, &T) -> V {
+impl<C: ?Sized, T: ?Sized, V, F> ContextFn<C, T> for F
+where
+    F: FnMut(&C, &T) -> V,
+{
     type Output = V;
 
     #[inline(always)]
@@ -184,7 +187,10 @@ pub trait ContextFoldFn<C: ?Sized, T: ?Sized, V> {
     fn call_mut(&mut self, ctx: &C, acc: &V, item: &T) -> Self::Output;
 }
 
-impl<C: ?Sized, T: ?Sized, V> ContextFoldFn<C, T, V> for FnMut(&C, &V, &T) -> V {
+impl<C: ?Sized, T: ?Sized, V, F> ContextFoldFn<C, T, V> for F
+where
+    F: FnMut(&C, &V, &T) -> V,
+{
     type Output = V;
 
     #[inline(always)]
