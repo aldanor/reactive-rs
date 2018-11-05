@@ -59,6 +59,23 @@ pub trait Stream<'a>: Sized {
         }
     }
 
+    fn map_both_ctx<F, C, T>(self, func: F) -> MapBoth<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> (C, T),
+    {
+        MapBoth { stream: self, func }
+    }
+
+    fn map_both<F, C, T>(self, func: F) -> MapBoth<Self, NoContext<F>>
+    where
+        F: 'a + FnMut(&Self::Item) -> (C, T),
+    {
+        MapBoth {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
     fn filter_ctx<F>(self, func: F) -> Filter<Self, F>
     where
         F: 'a + FnMut(&Self::Context, &Self::Item) -> bool,
@@ -425,6 +442,31 @@ where
         let mut func = self.func;
         self.stream.subscribe_ctx(move |ctx, x| {
             observer(ctx, &func.call_mut(ctx, x))
+        })
+    }
+}
+
+pub struct MapBoth<S, F> {
+    stream: S,
+    func: F,
+}
+
+impl<'a, S, F, C, T> Stream<'a> for MapBoth<S, F>
+    where
+        S: Stream<'a>,
+        F: 'a + ContextFn<S::Context, S::Item, Output = (C, T)>,
+{
+    type Context = C;
+    type Item = T;
+
+    fn subscribe_ctx<O>(self, mut observer: O)
+        where
+            O: FnMut(&Self::Context, &Self::Item) + 'a,
+    {
+        let mut func = self.func;
+        self.stream.subscribe_ctx(move |ctx, x| {
+            let (ctx, x) = func.call_mut(ctx, x);
+            observer(&ctx, &x);
         })
     }
 }
