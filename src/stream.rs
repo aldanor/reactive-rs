@@ -155,7 +155,7 @@ pub trait Stream<'a>: Sized {
     #[cfg(feature = "slice-deque")]
     fn last_n(self, count: usize) -> LastN<Self, Self::Item>
     where
-        Self::Item: Sized,
+        Self::Item: 'a + Clone + Sized,
     {
         LastN {
             count,
