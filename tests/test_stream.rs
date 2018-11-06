@@ -9,7 +9,7 @@ where
     S: Stream<'a>,
     S::Item: Sized + Clone,
 {
-    stream.subscribe(move |x| { cell.replace(x.clone()); });
+    stream.subscribe(move |x| cell.set(x.clone()));
 }
 
 fn subscribe_cell_ctx<'a, S>(stream: S, cell: &'a Cell<(S::Context, S::Item)>)
@@ -18,7 +18,7 @@ where
     S::Item: Sized + Clone,
     S::Context: Sized + Clone,
 {
-    stream.subscribe_ctx(move |ctx, x| { cell.replace((ctx.clone(), x.clone())); });
+    stream.subscribe_ctx(move |ctx, x| cell.set((ctx.clone(), x.clone())));
 }
 
 #[test]
@@ -218,14 +218,10 @@ fn test_inspect() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1));
     let s = ContextBroadcast::<f64, i32>::new();
-    let s1 = s.clone().inspect(|x| { i1.replace(*x); });
-    let s2 = s.clone().inspect_ctx(
-        |ctx, x| { i2_ctx.replace((*ctx, *x)); },
-    );
-    let _s3 = s.clone().inspect(|x| { i3.replace(*x); });
-    let _s4 = s.clone().inspect_ctx(
-        |ctx, x| { i4_ctx.replace((*ctx, *x)); },
-    );
+    let s1 = s.clone().inspect(|x| i1.set(*x));
+    let s2 = s.clone().inspect_ctx(|ctx, x| i2_ctx.set((*ctx, *x)));
+    let _s3 = s.clone().inspect(|x| i3.set(*x));
+    let _s4 = s.clone().inspect_ctx(|ctx, x| i4_ctx.set((*ctx, *x)));
     subscribe_cell_ctx(s1, &v1_ctx);
     subscribe_cell_ctx(s2, &v2_ctx);
     s.send_ctx(1.23, 4);
@@ -242,7 +238,7 @@ fn test_last_n() {
     let v1_ctx = RefCell::<(f64, Vec<i32>)>::new((-1., vec![]));
     let s = ContextBroadcast::<f64, i32>::new();
     let s1 = s.clone().last_n(2).map(|x| x.iter().cloned().collect());
-    s1.subscribe_ctx(|ctx, x: &Vec<_>| { v1_ctx.replace((*ctx, x.clone())); });
+    s1.subscribe_ctx(|ctx, x: &Vec<_>| *v1_ctx.borrow_mut() = (*ctx, x.clone()));
     assert_eq!(*v1_ctx.borrow(), (-1., vec![]));
     s.send_ctx(1.23, 4);
     assert_eq!(*v1_ctx.borrow(), (1.23, vec![4]));
@@ -258,7 +254,7 @@ fn test_last_n() {
 fn test_simple_subscribe() {
     let v = Cell::new(1);
     let s = Broadcast::<i32>::new();
-    s.clone().subscribe(|x| { v.replace(*x + v.get()); });
+    s.clone().subscribe(|x| v.set(*x + v.get()));
     assert_eq!(v.get(), 1);
     s.send(2);
     assert_eq!(v.get(), 3);
@@ -276,13 +272,13 @@ fn test_broadcast_map() {
     let x3 = Cell::new(3);
     let x4 = Cell::new(4);
     let s = Broadcast::<i32>::new();
-    s.clone().subscribe(|x| { x0.replace(*x); });
+    s.clone().subscribe(|x| x0.set(*x));
     let t = s.clone().map(|x| x * 2).broadcast();
-    t.clone().map(|x| x + 10).subscribe(|x| { x1.replace(*x); });
-    t.clone().map(|x| x + 20).subscribe(|x| { x2.replace(*x); });
+    t.clone().map(|x| x + 10).subscribe(|x| x1.set(*x));
+    t.clone().map(|x| x + 20).subscribe(|x| x2.set(*x));
     let u = t.map(|x| -x).broadcast();
-    u.clone().subscribe(|x| { x3.replace(*x); });
-    u.map(|x| x - 1).subscribe(|x| { x4.replace(*x); });
+    u.clone().subscribe(|x| x3.set(*x));
+    u.map(|x| x - 1).subscribe(|x| x4.set(*x));
     let x = || vec![x0.get(), x1.get(), x2.get(), x3.get(), x4.get()];
     assert_eq!(x(), &[0, 1, 2, 3, 4]);
     s.send(1);
@@ -299,8 +295,8 @@ fn test_broadcast_filter() {
     let t = s.clone().filter(|x| x % 5 != 0).broadcast();
     t.clone()
         .filter_map(|x| if x % 2 == 0 { Some(x * 10) } else { None })
-        .subscribe(|x| { x0.replace(*x); });
-    t.filter(|x| x % 3 != 0).subscribe(|x| { x1.replace(*x); });
+        .subscribe(|x| x0.set(*x));
+    t.filter(|x| x % 3 != 0).subscribe(|x| x1.set(*x));
     let x = || vec![x0.get(), x1.get()];
     assert_eq!(x(), &[0, 0]);
     s.send(0);
