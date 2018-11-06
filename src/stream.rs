@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::iter::Iterator;
 use std::rc::Rc;
 
-#[cfg(feature = "slice-deque")]
+#[cfg(any(test, feature = "slice-deque"))]
 use slice_deque::SliceDeque;
 
 pub trait Stream<'a>: Sized {
@@ -150,7 +150,7 @@ pub trait Stream<'a>: Sized {
         }
     }
 
-    #[cfg(feature = "slice-deque")]
+    #[cfg(any(test, feature = "slice-deque"))]
     fn last_n(self, count: usize) -> LastN<Self, Self::Item>
     where
         Self::Item: 'a + Clone + Sized,
@@ -544,14 +544,14 @@ where
     }
 }
 
-#[cfg(feature = "slice-deque")]
+#[cfg(any(test, feature = "slice-deque"))]
 pub struct LastN<S, T: Sized> {
     count: usize,
     stream: S,
     data: Rc<RefCell<SliceDeque<T>>>,
 }
 
-#[cfg(feature = "slice-deque")]
+#[cfg(any(test, feature = "slice-deque"))]
 impl<'a, S, T> Stream<'a> for LastN<S, T>
 where
     S: Stream<'a, Item = T>,
