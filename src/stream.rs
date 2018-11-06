@@ -133,14 +133,14 @@ pub trait Stream<'a>: Sized {
         }
     }
 
-    fn inspect_ctx<F, T>(self, func: F) -> Inspect<Self, F>
+    fn inspect_ctx<F>(self, func: F) -> Inspect<Self, F>
     where
         F: 'a + FnMut(&Self::Context, &Self::Item),
     {
         Inspect { stream: self, func }
     }
 
-    fn inspect<F, T>(self, func: F) -> Inspect<Self, NoContext<F>>
+    fn inspect<F>(self, func: F) -> Inspect<Self, NoContext<F>>
     where
         F: 'a + FnMut(&Self::Item),
     {
