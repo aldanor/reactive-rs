@@ -3,47 +3,117 @@ use std::cell::RefCell;
 use std::iter::Iterator;
 use std::rc::Rc;
 
+#[cfg(any(test, feature = "slice-deque"))]
 use slice_deque::SliceDeque;
 
 pub trait Stream<'a>: Sized {
+    type Context: ?Sized;
     type Item: ?Sized;
 
-    fn subscribe<O>(self, observer: O)
+    fn subscribe_ctx<O>(self, observer: O)
     where
-        O: 'a + FnMut(&Self::Item);
+        O: 'a + FnMut(&Self::Context, &Self::Item);
 
-    fn broadcast(self) -> Broadcast<'a, Self::Item>
+    fn subscribe<O>(self, mut observer: O)
+    where
+        O: 'a + FnMut(&Self::Item),
+    {
+        self.subscribe_ctx(move |_ctx, item| observer(item))
+    }
+
+    fn broadcast(self) -> ContextBroadcast<'a, Self::Context, Self::Item>
     where
         Self: 'a,
     {
-        Broadcast::from_stream(self)
+        ContextBroadcast::from_stream(self)
     }
 
-    fn map<F, T>(self, func: F) -> Map<Self, F>
+    fn ctx(self) -> Context<Self> {
+        Context { stream: self }
+    }
+
+    fn with_ctx<T>(self, ctx: T) -> WithContext<Self, T> {
+        WithContext { stream: self, ctx }
+    }
+
+    fn with_ctx_map<F, T>(self, func: F) -> WithContextMap<Self, F>
     where
-        F: 'a + FnMut(&Self::Item) -> T,
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> T,
+    {
+        WithContextMap { stream: self, func }
+    }
+
+    fn map_ctx<F, T>(self, func: F) -> Map<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> T,
     {
         Map { stream: self, func }
     }
 
-    fn filter<F>(self, func: F) -> Filter<Self, F>
+    fn map<F, T>(self, func: F) -> Map<Self, NoContext<F>>
     where
-        F: 'a + FnMut(&Self::Item) -> bool,
+        F: 'a + FnMut(&Self::Item) -> T,
+    {
+        Map {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn map_both_ctx<F, C, T>(self, func: F) -> MapBoth<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> (C, T),
+    {
+        MapBoth { stream: self, func }
+    }
+
+    fn map_both<F, C, T>(self, func: F) -> MapBoth<Self, NoContext<F>>
+    where
+        F: 'a + FnMut(&Self::Item) -> (C, T),
+    {
+        MapBoth {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn filter_ctx<F>(self, func: F) -> Filter<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> bool,
     {
         Filter { stream: self, func }
     }
 
-    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, F>
+    fn filter<F>(self, func: F) -> Filter<Self, NoContext<F>>
     where
-        F: 'a + FnMut(&Self::Item) -> Option<T>,
+        F: 'a + FnMut(&Self::Item) -> bool,
+    {
+        Filter {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn filter_map_ctx<F, T>(self, func: F) -> FilterMap<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item) -> Option<T>,
     {
         FilterMap { stream: self, func }
     }
 
-    fn fold<F, T>(self, func: F, init: T) -> Fold<Self, F, T>
+    fn filter_map<F, T>(self, func: F) -> FilterMap<Self, NoContext<F>>
     where
-        F: 'a + FnMut(&T, &Self::Item) -> T,
-        T: 'a,
+        F: 'a + FnMut(&Self::Item) -> Option<T>,
+    {
+        FilterMap {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    fn fold_ctx<F, T: 'a>(self, func: F, init: T) -> Fold<Self, F, T>
+    where
+        F: 'a + FnMut(&Self::Context, &T, &Self::Item) -> T,
     {
         Fold {
             stream: self,
@@ -52,16 +122,38 @@ pub trait Stream<'a>: Sized {
         }
     }
 
-    fn inspect<F, T>(self, func: F) -> Inspect<Self, F>
+    fn fold<F, T: 'a>(self, func: F, init: T) -> Fold<Self, NoContext<F>, T>
     where
-        F: 'a + FnMut(&Self::Item),
+        F: 'a + FnMut(&T, &Self::Item) -> T,
+    {
+        Fold {
+            stream: self,
+            func: NoContext(func),
+            value: init,
+        }
+    }
+
+    fn inspect_ctx<F>(self, func: F) -> Inspect<Self, F>
+    where
+        F: 'a + FnMut(&Self::Context, &Self::Item),
     {
         Inspect { stream: self, func }
     }
 
+    fn inspect<F>(self, func: F) -> Inspect<Self, NoContext<F>>
+    where
+        F: 'a + FnMut(&Self::Item),
+    {
+        Inspect {
+            stream: self,
+            func: NoContext(func),
+        }
+    }
+
+    #[cfg(any(test, feature = "slice-deque"))]
     fn last_n(self, count: usize) -> LastN<Self, Self::Item>
     where
-        Self::Item: Sized,
+        Self::Item: 'a + Clone + Sized,
     {
         LastN {
             count,
@@ -71,44 +163,126 @@ pub trait Stream<'a>: Sized {
     }
 }
 
-type Callback<'a, T> = Box<'a + FnMut(&T)>;
+pub trait ContextFn<C: ?Sized, T: ?Sized> {
+    type Output;
 
-pub struct Broadcast<'a, T: ?Sized> {
-    observers: Rc<RefCell<Vec<Callback<'a, T>>>>,
+    fn call_mut(&mut self, ctx: &C, item: &T) -> Self::Output;
 }
 
-impl<'a, T> Broadcast<'a, T>
+impl<C: ?Sized, T: ?Sized, V, F> ContextFn<C, T> for F
 where
-    T: 'a + ?Sized,
+    F: FnMut(&C, &T) -> V,
 {
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, ctx: &C, item: &T) -> Self::Output {
+        self(ctx, item)
+    }
+}
+
+pub trait ContextFoldFn<C: ?Sized, T: ?Sized, V> {
+    type Output;
+
+    fn call_mut(&mut self, ctx: &C, acc: &V, item: &T) -> Self::Output;
+}
+
+impl<C: ?Sized, T: ?Sized, V, F> ContextFoldFn<C, T, V> for F
+where
+    F: FnMut(&C, &V, &T) -> V,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, ctx: &C, acc: &V, item: &T) -> Self::Output {
+        self(ctx, acc, item)
+    }
+}
+
+pub struct NoContext<F>(F);
+
+impl<F, C: ?Sized, T: ?Sized, V> ContextFn<C, T> for NoContext<F>
+where
+    F: FnMut(&T) -> V,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, _ctx: &C, item: &T) -> Self::Output {
+        (self.0)(item)
+    }
+}
+
+impl<F, C: ?Sized, T: ?Sized, V> ContextFoldFn<C, T, V> for NoContext<F>
+where
+    F: FnMut(&V, &T) -> V,
+{
+    type Output = V;
+
+    #[inline(always)]
+    fn call_mut(&mut self, _ctx: &C, acc: &Self::Output, item: &T) -> Self::Output {
+        (self.0)(acc, item)
+    }
+}
+
+type Callback<'a, C, T> = Box<'a + FnMut(&C, &T)>;
+
+pub struct ContextBroadcast<'a, C: ?Sized, T: ?Sized> {
+    observers: Rc<RefCell<Vec<Callback<'a, C, T>>>>,
+}
+
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> ContextBroadcast<'a, C, T> {
     pub fn new() -> Self {
         Self { observers: Rc::new(RefCell::new(Vec::new())) }
     }
 
     pub fn from_stream<S>(stream: S) -> Self
     where
-        S: Stream<'a, Item = T>,
+        S: Stream<'a, Context = C, Item = T>,
     {
-        let broadcast = Broadcast::new();
+        let broadcast = Self::new();
         let clone = broadcast.clone();
-        stream.subscribe(move |x| clone.send(x));
+        stream.subscribe_ctx(move |ctx, x| clone.send_ctx(ctx, x));
         broadcast
     }
 
     fn push<F>(&self, func: F)
     where
-        F: FnMut(&T) + 'a,
+        F: FnMut(&C, &T) + 'a,
     {
         self.observers.borrow_mut().push(Box::new(func));
+    }
+
+    pub fn send_ctx<K, B>(&self, ctx: K, value: B)
+    where
+        K: Borrow<C>,
+        B: Borrow<T>,
+    {
+        let ctx = ctx.borrow();
+        let value = value.borrow();
+        for observer in self.observers.borrow_mut().iter_mut() {
+            observer(ctx, value);
+        }
     }
 
     pub fn send<B>(&self, value: B)
     where
         B: Borrow<T>,
+        C: Default,
     {
-        let value = value.borrow();
-        for observer in self.observers.borrow_mut().iter_mut() {
-            observer(value);
+        let ctx = C::default();
+        self.send_ctx(&ctx, value);
+    }
+
+    pub fn feed_ctx<K, B, I>(&self, ctx: K, iter: I)
+    where
+        K: Borrow<C>,
+        I: Iterator<Item = B>,
+        B: Borrow<T>,
+    {
+        let ctx = ctx.borrow();
+        for value in iter {
+            self.send_ctx(ctx, value);
         }
     }
 
@@ -116,42 +290,104 @@ where
     where
         I: Iterator<Item = B>,
         B: Borrow<T>,
+        C: Default,
     {
-        for value in iter {
-            self.send(value);
-        }
+        let ctx = C::default();
+        self.feed_ctx(&ctx, iter);
     }
 }
 
-impl<'a, T> Default for Broadcast<'a, T>
-where
-    T: 'a + ?Sized,
-{
+pub type Broadcast<'a, T> = ContextBroadcast<'a, (), T>;
+
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Default for ContextBroadcast<'a, C, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T> Clone for Broadcast<'a, T>
-where
-    T: 'a + ?Sized,
-{
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Clone for ContextBroadcast<'a, C, T> {
     fn clone(&self) -> Self {
         Self { observers: self.observers.clone() }
     }
 }
 
-impl<'a, T> Stream<'a> for Broadcast<'a, T>
-where
-    T: 'a + ?Sized,
-{
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Stream<'a> for ContextBroadcast<'a, C, T> {
+    type Context = C;
     type Item = T;
 
-    fn subscribe<O>(self, observer: O)
+    fn subscribe_ctx<O>(self, observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         self.push(observer);
+    }
+}
+
+pub struct WithContext<S, T> {
+    stream: S,
+    ctx: T,
+}
+
+impl<'a, S, T: 'a> Stream<'a> for WithContext<S, T>
+where
+    S: Stream<'a>,
+{
+    type Context = T;
+    type Item = S::Item;
+
+    fn subscribe_ctx<O>(self, mut observer: O)
+    where
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
+    {
+        let ctx = self.ctx;
+        self.stream.subscribe_ctx(
+            move |_ctx, x| { observer(&ctx, x); },
+        )
+    }
+}
+
+pub struct WithContextMap<S, F> {
+    stream: S,
+    func: F,
+}
+
+impl<'a, S, F, T> Stream<'a> for WithContextMap<S, F>
+where
+    S: Stream<'a>,
+    F: 'a + FnMut(&S::Context, &S::Item) -> T,
+{
+    type Context = T;
+    type Item = S::Item;
+
+    fn subscribe_ctx<O>(self, mut observer: O)
+    where
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
+    {
+        let mut func = self.func;
+        self.stream.subscribe_ctx(
+            move |ctx, x| { observer(&func(ctx, x), x); },
+        )
+    }
+}
+
+pub struct Context<S> {
+    stream: S,
+}
+
+impl<'a, S> Stream<'a> for Context<S>
+where
+    S: Stream<'a>,
+{
+    type Context = S::Context;
+    type Item = S::Context;
+
+    fn subscribe_ctx<O>(self, mut observer: O)
+    where
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
+    {
+        self.stream.subscribe_ctx(
+            move |ctx, _x| { observer(ctx, ctx); },
+        )
     }
 }
 
@@ -160,19 +396,47 @@ pub struct Map<S, F> {
     func: F,
 }
 
-impl<'a, S, F, T> Stream<'a> for Map<S, F>
+impl<'a, S, F> Stream<'a> for Map<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item) -> T,
+    F: 'a + ContextFn<S::Context, S::Item>,
 {
-    type Item = T;
+    type Context = S::Context;
+    type Item = F::Output;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| observer(&func(x)))
+        self.stream.subscribe_ctx(move |ctx, x| {
+            observer(ctx, &func.call_mut(ctx, x))
+        })
+    }
+}
+
+pub struct MapBoth<S, F> {
+    stream: S,
+    func: F,
+}
+
+impl<'a, S, F, C, T> Stream<'a> for MapBoth<S, F>
+    where
+        S: Stream<'a>,
+        F: 'a + ContextFn<S::Context, S::Item, Output = (C, T)>,
+{
+    type Context = C;
+    type Item = T;
+
+    fn subscribe_ctx<O>(self, mut observer: O)
+        where
+            O: FnMut(&Self::Context, &Self::Item) + 'a,
+    {
+        let mut func = self.func;
+        self.stream.subscribe_ctx(move |ctx, x| {
+            let (ctx, x) = func.call_mut(ctx, x);
+            observer(&ctx, &x);
+        })
     }
 }
 
@@ -184,18 +448,21 @@ pub struct Filter<S, F> {
 impl<'a, S, F> Stream<'a> for Filter<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item) -> bool,
+    F: 'a + ContextFn<S::Context, S::Item, Output = bool>,
 {
+    type Context = S::Context;
     type Item = S::Item;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: 'a + FnMut(&Self::Item),
+        O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if func(x) {
-            observer(x);
-        });
+        self.stream.subscribe_ctx(
+            move |ctx, x| if func.call_mut(ctx, x) {
+                observer(ctx, x);
+            },
+        );
     }
 }
 
@@ -207,18 +474,21 @@ pub struct FilterMap<S, F> {
 impl<'a, S, F, T> Stream<'a> for FilterMap<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item) -> Option<T>,
+    F: 'a + ContextFn<S::Context, S::Item, Output = Option<T>>,
 {
+    type Context = S::Context;
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: 'a + FnMut(&Self::Item),
+        O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| if let Some(x) = func(x) {
-            observer(&x);
-        });
+        self.stream.subscribe_ctx(
+            move |ctx, x| if let Some(x) = func.call_mut(ctx, x) {
+                observer(ctx, &x);
+            },
+        );
     }
 }
 
@@ -228,23 +498,23 @@ pub struct Fold<S, F, T> {
     value: T,
 }
 
-impl<'a, S, F, T> Stream<'a> for Fold<S, F, T>
+impl<'a, S, F, T: 'a> Stream<'a> for Fold<S, F, T>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&T, &S::Item) -> T,
-    T: 'a,
+    F: 'a + ContextFoldFn<S::Context, S::Item, T, Output = T>,
 {
+    type Context = S::Context;
     type Item = T;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
         let mut value = self.value;
-        self.stream.subscribe(move |x| {
-            value = func(&value, x);
-            observer(&value);
+        self.stream.subscribe_ctx(move |ctx, x| {
+            value = func.call_mut(ctx, &value, x);
+            observer(ctx, &value);
         })
     }
 }
@@ -257,49 +527,53 @@ pub struct Inspect<S, F> {
 impl<'a, S, F> Stream<'a> for Inspect<S, F>
 where
     S: Stream<'a>,
-    F: 'a + FnMut(&S::Item),
+    F: 'a + ContextFn<S::Context, S::Item, Output = ()>,
 {
+    type Context = S::Context;
     type Item = S::Item;
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: FnMut(&Self::Item) + 'a,
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe(move |x| {
-            func(x);
-            observer(x);
+        self.stream.subscribe_ctx(move |ctx, x| {
+            func.call_mut(ctx, x);
+            observer(ctx, x);
         })
     }
 }
 
+#[cfg(any(test, feature = "slice-deque"))]
 pub struct LastN<S, T: Sized> {
     count: usize,
     stream: S,
     data: Rc<RefCell<SliceDeque<T>>>,
 }
 
+#[cfg(any(test, feature = "slice-deque"))]
 impl<'a, S, T> Stream<'a> for LastN<S, T>
 where
     S: Stream<'a, Item = T>,
     T: 'a + Clone + Sized,
 {
+    type Context = S::Context;
     type Item = [T];
 
-    fn subscribe<O>(self, mut observer: O)
+    fn subscribe_ctx<O>(self, mut observer: O)
     where
-        O: 'a + FnMut(&Self::Item),
+        O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let data = self.data.clone();
         let count = self.count;
-        self.stream.subscribe(move |x| {
+        self.stream.subscribe_ctx(move |ctx, x| {
             let mut queue = data.borrow_mut();
             if queue.len() == count {
                 queue.pop_front();
             }
             queue.push_back(x.clone());
             drop(queue); // this is important, in order to avoid multiple mutable borrows
-            observer(&*data.as_ref().borrow());
+            observer(ctx, &*data.as_ref().borrow());
         })
     }
 }
