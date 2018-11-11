@@ -3,6 +3,6 @@
 #[cfg(any(test, feature = "slice-deque"))]
 extern crate slice_deque;
 
-pub use stream::{ContextBroadcast, Broadcast, Stream};
+pub use stream::{Broadcast, ContextBroadcast, Stream};
 
 mod stream;
