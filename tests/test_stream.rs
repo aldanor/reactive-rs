@@ -2,7 +2,7 @@ extern crate reactive_rs;
 
 use std::cell::{Cell, RefCell};
 
-use reactive_rs::{Broadcast, ContextBroadcast, Stream};
+use reactive_rs::{Broadcast, SimpleBroadcast, Stream};
 
 fn subscribe_cell<'a, S>(stream: S, cell: &'a Cell<S::Item>)
 where
@@ -25,7 +25,7 @@ where
 fn test_subscribe_no_ctx() {
     let v = Cell::new(0);
     let v_ctx = Cell::new(((), 0));
-    let s = Broadcast::<i32>::new();
+    let s = SimpleBroadcast::<i32>::new();
     subscribe_cell(s.clone(), &v);
     subscribe_cell_ctx(s.clone(), &v_ctx);
     s.send(3);
@@ -40,7 +40,7 @@ fn test_subscribe_no_ctx() {
 fn test_subscribe_explicit_ctx() {
     let v = Cell::new(0);
     let v_ctx = Cell::new((0., 0));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     subscribe_cell(s.clone(), &v);
     subscribe_cell_ctx(s.clone(), &v_ctx);
     s.send(3);
@@ -55,7 +55,7 @@ fn test_subscribe_explicit_ctx() {
 fn test_context_survives_operators() {
     let v = Cell::new(-1);
     let v_ctx = Cell::new((-1., -1));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let t = s.clone().filter(|x| x % 3 != 0).map(|x| x * 2).broadcast();
     subscribe_cell(t.clone(), &v);
     subscribe_cell_ctx(t.clone(), &v_ctx);
@@ -74,7 +74,7 @@ fn test_context_survives_operators() {
 fn test_multiple_broadcast_parents() {
     let v = Cell::new(-1);
     let v_ctx = Cell::new((-1., -1));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let t = s.clone().filter(|x| x % 3 != 0).map(|x| x * 2).broadcast();
     subscribe_cell(t.clone(), &v);
     subscribe_cell_ctx(t.clone(), &v_ctx);
@@ -91,7 +91,7 @@ fn test_ctx_methods() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1));
     let v3_ctx = Cell::new((-1., -1.));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().with_ctx(1.23);
     let s2 = s.clone().with_ctx_map(|ctx, x| *ctx + (*x as f64));
     let s3 = s.clone().ctx();
@@ -110,7 +110,7 @@ fn test_map() {
     let v2_ctx = Cell::new((-1., -1.));
     let v3_ctx = Cell::new((-1., -1.));
     let v4_ctx = Cell::new((-1., -1.));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().map(|x| x * 2);
     let s2 = s.clone().map_ctx(|ctx, x| *ctx + (*x as f64));
     let s3 = s.clone().map(|x| x * 2).map_ctx(|ctx, x| *ctx + (*x as f64));
@@ -135,7 +135,7 @@ fn test_map() {
 fn test_map_both() {
     let v1_ctx = Cell::new((-1, -1));
     let v2_ctx = Cell::new((-1, -1.));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().map_both(|x| (x * 2, x * 3));
     let s2 = s.clone().map_both_ctx(|ctx, x| (*x, *ctx));
     subscribe_cell_ctx(s1, &v1_ctx);
@@ -149,7 +149,7 @@ fn test_map_both() {
 fn test_filter() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().filter(|x| x % 2 == 0);
     let s2 = s.clone().filter_ctx(|ctx, x| (*x as f64) > *ctx);
     subscribe_cell_ctx(s1, &v1_ctx);
@@ -166,7 +166,7 @@ fn test_filter() {
 fn test_filter_map() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1.));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().filter_map(|x| if x % 2 == 0 { Some(2 * x) } else { None });
     let s2 =
         s.clone().filter_map_ctx(
@@ -186,7 +186,7 @@ fn test_filter_map() {
 fn test_fold() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1.));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().fold(|acc, x| acc + x, 0);
     let s2 = s.clone().fold_ctx(|ctx, acc, x| (acc + ctx) + (*x as f64), 0.);
     subscribe_cell_ctx(s1, &v1_ctx);
@@ -207,7 +207,7 @@ fn test_inspect() {
     let i4_ctx = Cell::new((-1., -1));
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().inspect(|x| i1.set(*x));
     let s2 = s.clone().inspect_ctx(|ctx, x| i2_ctx.set((*ctx, *x)));
     let _s3 = s.clone().inspect(|x| i3.set(*x));
@@ -226,7 +226,7 @@ fn test_inspect() {
 #[test]
 fn test_last_n() {
     let v1_ctx = RefCell::<(f64, Vec<i32>)>::new((-1., vec![]));
-    let s = ContextBroadcast::<f64, i32>::new();
+    let s = Broadcast::<f64, i32>::new();
     let s1 = s.clone().last_n(2).map(|x| x.iter().cloned().collect());
     s1.subscribe_ctx(|ctx, x: &Vec<_>| *v1_ctx.borrow_mut() = (*ctx, x.clone()));
     assert_eq!(*v1_ctx.borrow(), (-1., vec![]));
@@ -243,7 +243,7 @@ fn test_last_n() {
 #[test]
 fn test_simple_subscribe() {
     let v = Cell::new(1);
-    let s = Broadcast::<i32>::new();
+    let s = SimpleBroadcast::<i32>::new();
     s.clone().subscribe(|x| v.set(*x + v.get()));
     assert_eq!(v.get(), 1);
     s.send(2);
@@ -261,7 +261,7 @@ fn test_broadcast_map() {
     let x2 = Cell::new(2);
     let x3 = Cell::new(3);
     let x4 = Cell::new(4);
-    let s = Broadcast::<i32>::new();
+    let s = SimpleBroadcast::<i32>::new();
     s.clone().subscribe(|x| x0.set(*x));
     let t = s.clone().map(|x| x * 2).broadcast();
     t.clone().map(|x| x + 10).subscribe(|x| x1.set(*x));
@@ -281,7 +281,7 @@ fn test_broadcast_map() {
 fn test_broadcast_filter() {
     let x0 = Cell::new(0);
     let x1 = Cell::new(0);
-    let s = Broadcast::<i32>::new();
+    let s = SimpleBroadcast::<i32>::new();
     let t = s.clone().filter(|x| x % 5 != 0).broadcast();
     t.clone()
         .filter_map(|x| if x % 2 == 0 { Some(x * 10) } else { None })

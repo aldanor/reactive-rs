@@ -34,7 +34,7 @@ pub trait Stream<'a>: Sized {
     /// ```
     /// # use reactive_rs::*; use std::cell::Cell;
     /// let result = Cell::new((0, 0.));
-    /// let stream = ContextBroadcast::<i32, f64>::new();
+    /// let stream = Broadcast::<i32, f64>::new();
     /// stream
     ///     .clone()
     ///     .map_ctx(|c, x| (*c as f64) + *x)
@@ -52,13 +52,13 @@ pub trait Stream<'a>: Sized {
     /// container; all other methods can be inlined.
     ///
     /// Note: this is equivalent to creating a broadcast via
-    /// [`from_stream()`](struct.ContextBroadcast.html#provided-methods)
+    /// [`from_stream()`](struct.Broadcast.html#provided-methods)
     /// constructor.
-    fn broadcast(self) -> ContextBroadcast<'a, Self::Context, Self::Item>
+    fn broadcast(self) -> Broadcast<'a, Self::Context, Self::Item>
     where
         Self: 'a,
     {
-        ContextBroadcast::from_stream(self)
+        Broadcast::from_stream(self)
     }
 
     /// Convenience method to extract the context into a separate stream.
@@ -67,7 +67,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = ContextBroadcast::<i32, String>::new();
+    /// let stream = Broadcast::<i32, String>::new();
     /// let double_ctx = stream.ctx().map(|x| x * 2);
     /// ```
     ///
@@ -87,7 +87,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<String>::new();
+    /// let stream = SimpleBroadcast::<String>::new();
     /// let stream_with_ctx = stream.with_ctx(42);
     /// ```
     ///
@@ -107,7 +107,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<String>::new();
+    /// let stream = SimpleBroadcast::<String>::new();
     /// let string_and_len = stream.with_ctx_map(|_, s| s.len());
     /// ```
     ///
@@ -131,7 +131,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<String>::new();
+    /// let stream = SimpleBroadcast::<String>::new();
     /// let contains_foo = stream.map(|s| s.contains("foo"));
     /// ```
     ///
@@ -155,7 +155,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = ContextBroadcast::<bool, i32>::new();
+    /// let stream = Broadcast::<bool, i32>::new();
     /// let div2 = stream.map_ctx(|c, x| (*x % 2 == 0) == *c);
     /// ```
     fn map_ctx<F, T>(self, func: F) -> Map<Self, F>
@@ -172,7 +172,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*; type A = i32; type B = u32;
-    /// let stream = Broadcast::<i32>::new();
+    /// let stream = SimpleBroadcast::<i32>::new();
     /// let string_context = stream.map_both(|x| (x.to_string(), *x));
     /// ```
     ///
@@ -196,7 +196,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*; type A = i32; type B = u32;
-    /// let stream = ContextBroadcast::<A, B>::new();
+    /// let stream = Broadcast::<A, B>::new();
     /// let swapped = stream.map_both_ctx(|a, b| (*a, *b));
     /// ```
     fn map_both_ctx<F, C, T>(self, func: F) -> MapBoth<Self, F>
@@ -216,7 +216,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<Vec<i32>>::new();
+    /// let stream = SimpleBroadcast::<Vec<i32>>::new();
     /// let non_empty = stream.filter(|v| !v.is_empty());
     /// ```
     ///
@@ -240,7 +240,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = ContextBroadcast::<usize, Vec<i32>>::new();
+    /// let stream = Broadcast::<usize, Vec<i32>>::new();
     /// let filter_len = stream.filter_ctx(|ctx, v| v.len() == *ctx);
     /// ```
     fn filter_ctx<F>(self, func: F) -> Filter<Self, F>
@@ -259,7 +259,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<String>::new();
+    /// let stream = SimpleBroadcast::<String>::new();
     /// let valid_ints = stream.filter_map(|s| s.parse::<i64>().ok());
     /// ```
     ///
@@ -283,7 +283,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = ContextBroadcast::<Option<i64>, String>::new();
+    /// let stream = Broadcast::<Option<i64>, String>::new();
     /// let int_or_ctx = stream.filter_map_ctx(|c, s| s.parse().ok().or(*c));
     /// ```
     fn filter_map_ctx<F, T>(self, func: F) -> FilterMap<Self, F>
@@ -304,7 +304,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<i32>::new();
+    /// let stream = SimpleBroadcast::<i32>::new();
     /// let running_sum = stream.fold(|acc, x| acc + x, 0);
     /// ```
     ///
@@ -328,7 +328,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = ContextBroadcast::<i32, i32>::new();
+    /// let stream = Broadcast::<i32, i32>::new();
     /// let lim_sum = stream.fold_ctx(|c, acc, x| *c.min(&(acc + x)), 0);
     /// ```
     fn fold_ctx<F, T: 'a>(self, func: F, init: T) -> Fold<Self, F, T>
@@ -347,7 +347,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<String>::new();
+    /// let stream = SimpleBroadcast::<String>::new();
     /// let stream = stream.inspect(|x| println!("{:?}", x));
     /// ```
     ///
@@ -371,7 +371,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = ContextBroadcast::<i32, String>::new();
+    /// let stream = Broadcast::<i32, String>::new();
     /// let stream = stream.inspect_ctx(|c, x| println!("{} {}", c, x));
     /// ```
     fn inspect_ctx<F>(self, func: F) -> Inspect<Self, F>
@@ -391,7 +391,7 @@ pub trait Stream<'a>: Sized {
     ///
     /// ```
     /// # use reactive_rs::*;
-    /// let stream = Broadcast::<i64>::new();
+    /// let stream = SimpleBroadcast::<i64>::new();
     /// let last_3 = stream.last_n(3);
     /// ```
     ///
@@ -479,11 +479,11 @@ where
 type Callback<'a, C, T> = Box<'a + FnMut(&C, &T)>;
 
 /// Event source that feeds (context, value) pairs to multiple observers.
-pub struct ContextBroadcast<'a, C: ?Sized, T: ?Sized> {
+pub struct Broadcast<'a, C: ?Sized, T: ?Sized> {
     observers: Rc<RefCell<Vec<Callback<'a, C, T>>>>,
 }
 
-impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> ContextBroadcast<'a, C, T> {
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Broadcast<'a, C, T> {
     /// Creates a new broadcast with specified context and item types.
     pub fn new() -> Self {
         Self { observers: Rc::new(RefCell::new(Vec::new())) }
@@ -560,21 +560,21 @@ impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> ContextBroadcast<'a, C, T> {
 }
 
 /// Simplified broadcast that only transmits values without context.
-pub type Broadcast<'a, T> = ContextBroadcast<'a, (), T>;
+pub type SimpleBroadcast<'a, T> = Broadcast<'a, (), T>;
 
-impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Default for ContextBroadcast<'a, C, T> {
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Default for Broadcast<'a, C, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Clone for ContextBroadcast<'a, C, T> {
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Clone for Broadcast<'a, C, T> {
     fn clone(&self) -> Self {
         Self { observers: self.observers.clone() }
     }
 }
 
-impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Stream<'a> for ContextBroadcast<'a, C, T> {
+impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Stream<'a> for Broadcast<'a, C, T> {
     type Context = C;
     type Item = T;
 
