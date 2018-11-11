@@ -155,11 +155,7 @@ pub trait Stream<'a>: Sized {
     where
         Self::Item: 'a + Clone + Sized,
     {
-        LastN {
-            count,
-            stream: self,
-            data: Rc::new(RefCell::new(SliceDeque::with_capacity(count))),
-        }
+        LastN { count, stream: self, data: Rc::new(RefCell::new(SliceDeque::with_capacity(count))) }
     }
 }
 
@@ -340,9 +336,9 @@ where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let ctx = self.ctx;
-        self.stream.subscribe_ctx(
-            move |_ctx, x| { observer(&ctx, x); },
-        )
+        self.stream.subscribe_ctx(move |_ctx, x| {
+            observer(&ctx, x);
+        })
     }
 }
 
@@ -364,9 +360,9 @@ where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe_ctx(
-            move |ctx, x| { observer(&func(ctx, x), x); },
-        )
+        self.stream.subscribe_ctx(move |ctx, x| {
+            observer(&func(ctx, x), x);
+        })
     }
 }
 
@@ -385,9 +381,9 @@ where
     where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
-        self.stream.subscribe_ctx(
-            move |ctx, _x| { observer(ctx, ctx); },
-        )
+        self.stream.subscribe_ctx(move |ctx, _x| {
+            observer(ctx, ctx);
+        })
     }
 }
 
@@ -409,9 +405,7 @@ where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
-        self.stream.subscribe_ctx(move |ctx, x| {
-            observer(ctx, &func.call_mut(ctx, x))
-        })
+        self.stream.subscribe_ctx(move |ctx, x| observer(ctx, &func.call_mut(ctx, x)))
     }
 }
 
@@ -421,16 +415,16 @@ pub struct MapBoth<S, F> {
 }
 
 impl<'a, S, F, C, T> Stream<'a> for MapBoth<S, F>
-    where
-        S: Stream<'a>,
-        F: 'a + ContextFn<S::Context, S::Item, Output = (C, T)>,
+where
+    S: Stream<'a>,
+    F: 'a + ContextFn<S::Context, S::Item, Output = (C, T)>,
 {
     type Context = C;
     type Item = T;
 
     fn subscribe_ctx<O>(self, mut observer: O)
-        where
-            O: FnMut(&Self::Context, &Self::Item) + 'a,
+    where
+        O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
         let mut func = self.func;
         self.stream.subscribe_ctx(move |ctx, x| {
@@ -458,11 +452,11 @@ where
         O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe_ctx(
-            move |ctx, x| if func.call_mut(ctx, x) {
+        self.stream.subscribe_ctx(move |ctx, x| {
+            if func.call_mut(ctx, x) {
                 observer(ctx, x);
-            },
-        );
+            }
+        });
     }
 }
 
@@ -484,11 +478,11 @@ where
         O: 'a + FnMut(&Self::Context, &Self::Item),
     {
         let mut func = self.func;
-        self.stream.subscribe_ctx(
-            move |ctx, x| if let Some(x) = func.call_mut(ctx, x) {
+        self.stream.subscribe_ctx(move |ctx, x| {
+            if let Some(x) = func.call_mut(ctx, x) {
                 observer(ctx, &x);
-            },
-        );
+            }
+        });
     }
 }
 

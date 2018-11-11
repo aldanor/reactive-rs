@@ -113,12 +113,8 @@ fn test_map() {
     let s = ContextBroadcast::<f64, i32>::new();
     let s1 = s.clone().map(|x| x * 2);
     let s2 = s.clone().map_ctx(|ctx, x| *ctx + (*x as f64));
-    let s3 = s.clone().map(|x| x * 2).map_ctx(
-        |ctx, x| *ctx + (*x as f64),
-    );
-    let s4 = s.clone().map_ctx(|ctx, x| *ctx + (*x as f64)).map(
-        |x| x * 2.,
-    );
+    let s3 = s.clone().map(|x| x * 2).map_ctx(|ctx, x| *ctx + (*x as f64));
+    let s4 = s.clone().map_ctx(|ctx, x| *ctx + (*x as f64)).map(|x| x * 2.);
     subscribe_cell_ctx(s1, &v1_ctx);
     subscribe_cell_ctx(s2, &v2_ctx);
     subscribe_cell_ctx(s3, &v3_ctx);
@@ -171,14 +167,11 @@ fn test_filter_map() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1.));
     let s = ContextBroadcast::<f64, i32>::new();
-    let s1 = s.clone().filter_map(
-        |x| if x % 2 == 0 { Some(2 * x) } else { None },
-    );
-    let s2 = s.clone().filter_map_ctx(|ctx, x| if (*x as f64) > *ctx {
-        Some(ctx + (*x as f64))
-    } else {
-        None
-    });
+    let s1 = s.clone().filter_map(|x| if x % 2 == 0 { Some(2 * x) } else { None });
+    let s2 =
+        s.clone().filter_map_ctx(
+            |ctx, x| if (*x as f64) > *ctx { Some(ctx + (*x as f64)) } else { None },
+        );
     subscribe_cell_ctx(s1, &v1_ctx);
     subscribe_cell_ctx(s2, &v2_ctx);
     s.send_ctx(4.1, 4);
@@ -195,10 +188,7 @@ fn test_fold() {
     let v2_ctx = Cell::new((-1., -1.));
     let s = ContextBroadcast::<f64, i32>::new();
     let s1 = s.clone().fold(|acc, x| acc + x, 0);
-    let s2 = s.clone().fold_ctx(
-        |ctx, acc, x| (acc + ctx) + (*x as f64),
-        0.,
-    );
+    let s2 = s.clone().fold_ctx(|ctx, acc, x| (acc + ctx) + (*x as f64), 0.);
     subscribe_cell_ctx(s1, &v1_ctx);
     subscribe_cell_ctx(s2, &v2_ctx);
     s.send_ctx(4.1, 4);
