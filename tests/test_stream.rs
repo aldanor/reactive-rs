@@ -187,8 +187,8 @@ fn test_fold() {
     let v1_ctx = Cell::new((-1., -1));
     let v2_ctx = Cell::new((-1., -1.));
     let s = Broadcast::<f64, i32>::new();
-    let s1 = s.clone().fold(|acc, x| acc + x, 0);
-    let s2 = s.clone().fold_ctx(|ctx, acc, x| (acc + ctx) + (*x as f64), 0.);
+    let s1 = s.clone().fold(0, |acc, x| acc + x);
+    let s2 = s.clone().fold_ctx(0., |ctx, acc, x| (acc + ctx) + (*x as f64));
     subscribe_cell_ctx(s1, &v1_ctx);
     subscribe_cell_ctx(s2, &v2_ctx);
     s.send_ctx(4.1, 4);

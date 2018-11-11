@@ -305,7 +305,7 @@ pub trait Stream<'a>: Sized {
     /// ```
     /// # use reactive_rs::*;
     /// let stream = SimpleBroadcast::<i32>::new();
-    /// let running_sum = stream.fold(|acc, x| acc + x, 0);
+    /// let cum_sum = stream.fold(0, |acc, x| acc + x);
     /// ```
     ///
     /// # Notes
@@ -314,11 +314,11 @@ pub trait Stream<'a>: Sized {
     /// - The closure receives all of its arguments by reference.
     /// - The return value is a `Stream` object (context type is unchanged;
     ///   value type is the accumulator type).
-    fn fold<F, T: 'a>(self, func: F, init: T) -> Fold<Self, NoContext<F>, T>
+    fn fold<F, T: 'a>(self, init: T, func: F) -> Fold<Self, NoContext<F>, T>
     where
         F: 'a + FnMut(&T, &Self::Item) -> T,
     {
-        Fold { stream: self, func: NoContext(func), value: init }
+        Fold { stream: self, init, func: NoContext(func) }
     }
 
     /// Same as `fold()`, but the closure receives three arguments
@@ -329,13 +329,13 @@ pub trait Stream<'a>: Sized {
     /// ```
     /// # use reactive_rs::*;
     /// let stream = Broadcast::<i32, i32>::new();
-    /// let lim_sum = stream.fold_ctx(|c, acc, x| *c.min(&(acc + x)), 0);
+    /// let bnd_sum = stream.fold_ctx(0, |c, acc, x| *c.min(&(acc + x)));
     /// ```
-    fn fold_ctx<F, T: 'a>(self, func: F, init: T) -> Fold<Self, F, T>
+    fn fold_ctx<F, T: 'a>(self, init: T, func: F) -> Fold<Self, F, T>
     where
         F: 'a + FnMut(&Self::Context, &T, &Self::Item) -> T,
     {
-        Fold { stream: self, func, value: init }
+        Fold { stream: self, init, func }
     }
 
     /// Do something with each element of a stream, passing the value on.
@@ -755,8 +755,8 @@ where
 
 pub struct Fold<S, F, T> {
     stream: S,
+    init: T,
     func: F,
-    value: T,
 }
 
 impl<'a, S, F, T: 'a> Stream<'a> for Fold<S, F, T>
@@ -771,8 +771,8 @@ where
     where
         O: FnMut(&Self::Context, &Self::Item) + 'a,
     {
+        let mut value = self.init;
         let mut func = self.func;
-        let mut value = self.value;
         self.stream.subscribe_ctx(move |ctx, x| {
             value = func.call_mut(ctx, &value, x);
             observer(ctx, &value);
