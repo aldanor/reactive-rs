@@ -1,0 +1,145 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `reactive_rs` crate."><meta name="keywords" content="rust, rustlang, rust-lang, reactive_rs"><title>reactive_rs - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><p class='location'>Crate reactive_rs</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li><li><a href="#types">Type Definitions</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'reactive_rs', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/reactive_rs/lib.rs.html#1-143' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>reactive_rs</a></span></h1><div class='docblock'><p>This crate provides the building blocks for functional reactive programming (FRP)
+in Rust. It is inspired by
+<a href="https://crates.io/crates/carboxyl">carboxyl</a>,
+<a href="https://crates.io/crates/frappe">frappe</a>
+and <a href="https://crates.io/crates/bidule">bidule</a> crates, and
+various <a href="http://reactivex.io/">ReactiveX</a> implementations.</p>
+<h1 id="overview" class="section-header"><a href="#overview">Overview</a></h1><h2 id="purpose" class="section-header"><a href="#purpose">Purpose</a></h2>
+<p>The main use case of this library is to simplify creating efficient
+computational DAGs (or computational trees, to be precise) that operate
+on streams of values. It does not aim to replicate the entire galaxy of
+ReactiveX operators, nor does it attempt to delve into
+futures/concurrency territory.</p>
+<p>What is a computational tree? First, there's the root at the top, that's
+where the input values get fed into continuously. Then, we perform
+computations on these values – each of which may yield zero,
+one or more values that are sent further down. Some downstream
+nodes may share their parents – for instance, <code>g(f(x))</code> and <code>h(f(x))</code>, where <code>x</code> is
+the input and <code>f</code> is the intermediate transformation; in this case, we want
+to make sure we don't have to recompute <code>f(x)</code> twice. Moreover, this
+being Rust, we'd like to ensure we're not copying and cloning any values
+needlessly, and we generally prefer things to be zero-cost/inlineable
+when possible. Finally, there are leaves – these are observers, functions
+that receive transform values and do something with them, likely recording
+them somewhere or mutating the environment in some other way.</p>
+<h2 id="terminology" class="section-header"><a href="#terminology">Terminology</a></h2>
+<ul>
+<li><em>Observer</em> - a function that accepts a value and returns nothing (it will
+most often that note mutate the external environment in some way).</li>
+<li><em>Stream</em> - an object can be subscribed to by passing an observer to it.
+Subscribing to a stream consumes the stream, thus at most one observer
+can ever be attached to a given stream.</li>
+<li><em>Broadcast</em> - an observer that owns a collection of other observers and
+transmits its input to each one of them sequentially. A broadcast can
+produce new streams, <em>subscriptions</em>, each one receiving the same input
+as the broadcast itself. Subscription is a stream that adds its
+subscribers to the broadcast's collection when being subscribed to.</li>
+</ul>
+<h2 id="context" class="section-header"><a href="#context">Context</a></h2>
+<p>Streams, broadcasts and observers in this crate operate on pairs of
+values: the <em>context</em> and the <em>element</em>. Context can be viewed as
+optional metadata attached to the original value. Closures required in
+methods like <code>.map()</code> only take one argument (the element) and are
+expected to return a single value; this way, the element can be changed
+without touching the context. This can be extremely convenient if you
+need to access the original input value (or any &quot;upstream&quot; value) way
+down the computation chain – this way you don't have to propagate
+it explicitly.</p>
+<p>Most stream/broadcast methods have an alternative &quot;full&quot; version that
+operates on both context/element, with <code>_ctx</code> suffix.</p>
+<h2 id="examples" class="section-header"><a href="#examples">Examples</a></h2>
+<p>Consider the following problem: we have an incoming stream of
+buy/sell price pairs, and for each incoming event we would like to
+compute how the current mid-price (the average between the two)
+compares relatively to the minimum buy price and the maximum sell
+price over the last three observations. Moreover, we would like to
+skip the first few events in order to allow the buffer to fill up.</p>
+<p>Here's one way we could do it (not the most ultimately efficient
+way of solving this particular problem, but it serves quite well
+to demonstrate the basic functionality of the crate):</p>
+
+<pre class="rust rust-example-rendered">
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">cell</span>::<span class="ident">Cell</span>;
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">f64</span>;
+<span class="kw">use</span> <span class="ident">reactive_rs</span>::<span class="kw-2">*</span>;
+
+<span class="kw">let</span> <span class="ident">min_rel</span> <span class="op">=</span> <span class="ident">Cell</span>::<span class="ident">new</span>(<span class="number">0.</span>);
+<span class="kw">let</span> <span class="ident">max_rel</span> <span class="op">=</span> <span class="ident">Cell</span>::<span class="ident">new</span>(<span class="number">0.</span>);
+
+<span class="comment">// create a broadcast of (buy, sell) pairs</span>
+<span class="kw">let</span> <span class="ident">quotes</span> <span class="op">=</span> <span class="ident">SimpleBroadcast</span>::<span class="ident">new</span>();
+
+<span class="comment">// clone the broadcast so we can feed values to it later</span>
+<span class="kw">let</span> <span class="ident">last</span> <span class="op">=</span> <span class="ident">quotes</span>.<span class="ident">clone</span>()
+    <span class="comment">// save the mid-price for later use</span>
+    .<span class="ident">with_ctx_map</span>(<span class="op">|</span><span class="kw">_</span>, <span class="kw-2">&amp;</span>(<span class="ident">buy</span>, <span class="ident">sell</span>)<span class="op">|</span> (<span class="ident">buy</span> <span class="op">+</span> <span class="ident">sell</span>) <span class="op">/</span> <span class="number">2.</span>)
+    <span class="comment">// cache the last three observations</span>
+    .<span class="ident">last_n</span>(<span class="number">3</span>)
+    <span class="comment">// wait until the queue fills up</span>
+    .<span class="ident">filter</span>(<span class="op">|</span><span class="ident">quotes</span><span class="op">|</span> <span class="ident">quotes</span>.<span class="ident">len</span>() <span class="op">&gt;</span> <span class="number">2</span>)
+    <span class="comment">// share the output (slices of values)</span>
+    .<span class="ident">broadcast</span>();
+
+<span class="comment">// subscribe to the stream of slices</span>
+<span class="kw">let</span> <span class="ident">min</span> <span class="op">=</span> <span class="ident">last</span>.<span class="ident">clone</span>()
+    <span class="comment">// compute min buy price</span>
+    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="ident">p</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">q</span><span class="op">|</span> <span class="ident">q</span>.<span class="number">0</span>).<span class="ident">fold</span>(<span class="number">1.</span><span class="op">/</span><span class="number">0.</span>, <span class="ident">f64</span>::<span class="ident">min</span>));
+<span class="comment">// subscribe to the stream of slices</span>
+<span class="kw">let</span> <span class="ident">max</span> <span class="op">=</span> <span class="ident">last</span>.<span class="ident">clone</span>()
+    <span class="comment">// compute max sell price</span>
+    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="ident">p</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">q</span><span class="op">|</span> <span class="ident">q</span>.<span class="number">1</span>).<span class="ident">fold</span>(<span class="op">-</span><span class="number">1.</span><span class="op">/</span><span class="number">0.</span>, <span class="ident">f64</span>::<span class="ident">max</span>));
+
+<span class="comment">// finally, attach observers</span>
+<span class="ident">min</span>.<span class="ident">subscribe_ctx</span>(<span class="op">|</span><span class="ident">p</span>, <span class="ident">min</span><span class="op">|</span> <span class="ident">min_rel</span>.<span class="ident">set</span>(<span class="ident">min</span> <span class="op">/</span> <span class="ident">p</span>));
+<span class="ident">max</span>.<span class="ident">subscribe_ctx</span>(<span class="op">|</span><span class="ident">p</span>, <span class="ident">max</span><span class="op">|</span> <span class="ident">max_rel</span>.<span class="ident">set</span>(<span class="ident">max</span> <span class="op">/</span> <span class="ident">p</span>));
+
+<span class="ident">quotes</span>.<span class="ident">send</span>((<span class="number">100.</span>, <span class="number">102.</span>));
+<span class="ident">quotes</span>.<span class="ident">send</span>((<span class="number">101.</span>, <span class="number">103.</span>));
+<span class="macro">assert_eq</span><span class="macro">!</span>((<span class="ident">min_rel</span>.<span class="ident">get</span>(), <span class="ident">max_rel</span>.<span class="ident">get</span>()), (<span class="number">0.</span>, <span class="number">0.</span>));
+<span class="ident">quotes</span>.<span class="ident">send</span>((<span class="number">99.</span>, <span class="number">101.</span>));
+<span class="macro">assert_eq</span><span class="macro">!</span>((<span class="ident">min_rel</span>.<span class="ident">get</span>(), <span class="ident">max_rel</span>.<span class="ident">get</span>()), (<span class="number">0.99</span>, <span class="number">1.03</span>));
+<span class="ident">quotes</span>.<span class="ident">send</span>((<span class="number">97.</span>, <span class="number">103.</span>));
+<span class="macro">assert_eq</span><span class="macro">!</span>((<span class="ident">min_rel</span>.<span class="ident">get</span>(), <span class="ident">max_rel</span>.<span class="ident">get</span>()), (<span class="number">0.97</span>, <span class="number">1.03</span>));</pre>
+<h1 id="lifetimes" class="section-header"><a href="#lifetimes">Lifetimes</a></h1>
+<p>Many <code>Stream</code> trait methods accept mutable closures; observers are
+also essentially just closures, and they are the only way you can
+get results from the stream out into the environment. Rest assured,
+at some point you'll run into lifetime problems (this being Rust,
+it's pretty much certain).</p>
+<p>Here's the main rule: lifetimes of observers (that is, lifetimes of
+what they capture, if anything) may not be shorter than the lifetime of
+the stream object. Same applies to lifetimes of closures in methods
+like <code>.map()</code>.</p>
+<p>In some situations it' tough to prove to the compiler you're doing
+something sane, in which case arena-based allocators (like
+<a href="https://crates.io/crates/typed-arena"><code>typed-arena</code></a>) may be
+of great help – allowing you to tie lifetimes of a bunch of
+objects together, ensuring simultaneous deallocation.</p>
+</div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.Broadcast.html"
+                                  title='struct reactive_rs::Broadcast'>Broadcast</a></td>
+                           <td class='docblock-short'>
+                                <p>Event source that transmits context/value pairs to multiple observers.</p>
+
+                           </td>
+                       </tr></table><h2 id='traits' class='section-header'><a href="#traits">Traits</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="trait" href="trait.Stream.html"
+                                  title='trait reactive_rs::Stream'>Stream</a></td>
+                           <td class='docblock-short'>
+                                <p>A stream of context/value pairs that can be subscribed to.</p>
+
+                           </td>
+                       </tr></table><h2 id='types' class='section-header'><a href="#types">Type Definitions</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="type" href="type.SimpleBroadcast.html"
+                                  title='type reactive_rs::SimpleBroadcast'>SimpleBroadcast</a></td>
+                           <td class='docblock-short'>
+                                <p>Simplified broadcast that only transmits values without context.</p>
+
+                           </td>
+                       </tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../";window.currentCrate = "reactive_rs";</script><script src="../aliases.js"></script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>
