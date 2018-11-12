@@ -1,6 +1,6 @@
 [package]
 name = "reactive-rs"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ivan Smirnov <i.s.smirnov@gmail.com>"]
 description = "FRP in Rust: streams and broadcasts."
 keywords = ["reactive", "frp", "stream", "broadcast"]
