@@ -8,7 +8,7 @@ use slice_deque::SliceDeque;
 
 /// A stream of context/value pairs that can be subscribed to.
 ///
-/// Note that in order to use stream trait methods, `Stream` trait
+/// Note: in order to use stream trait methods, this trait
 /// must imported into the current scope.
 pub trait Stream<'a>: Sized {
     /// The type of the context attached to emitted elements.
@@ -19,6 +19,26 @@ pub trait Stream<'a>: Sized {
     /// The type of the elements being emitted.
     type Item: ?Sized;
 
+    /// Attaches an observer (a user-provided mutable closure) to the
+    /// stream, which consumes the stream object.
+    ///
+    /// A stream with no observer attached is essentially just
+    /// a function of an observer; it will not react to incoming events
+    /// until it is subscribed to.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use reactive_rs::*; use std::cell::RefCell;
+    /// let out = RefCell::new(Vec::new());
+    /// let stream = SimpleBroadcast::<i64>::new();
+    /// stream
+    ///     .clone()
+    ///     .filter(|x| x % 2 != 0)
+    ///     .subscribe(|x| out.borrow_mut().push(*x));
+    /// stream.feed(0..=5);
+    /// assert_eq!(&*out.borrow(), &[1, 3, 5]);
+    /// ```
     fn subscribe<O>(self, mut observer: O)
     where
         O: 'a + FnMut(&Self::Item),
@@ -478,7 +498,35 @@ where
 
 type Callback<'a, C, T> = Box<'a + FnMut(&C, &T)>;
 
-/// Event source that feeds (context, value) pairs to multiple observers.
+/// Event source that transmits context/value pairs to multiple observers.
+///
+/// In order to "fork" the broadcast (creating a new stream that will
+/// be subscribed to it), the broadcast object can be simply cloned
+/// via the `Clone` trait. Note that cloning the broadcast only
+/// increases its reference count; no values are being cloned or copied.
+///
+/// A broadcast may receive a value in one of two ways. First, the user
+/// may explicitly call one of its methods: `send()`,  `send_ctx()`,
+/// `feed()`, `feed_ctx()`. Second, the broadcast may be created
+/// from a parent stream via [`broadcast()`](trait.Stream.html#provided-methods)
+/// method of the stream object. Either way, each context/value pair received
+/// is passed on to each of the subscribed observers, by reference.
+///
+/// # Examples
+///
+/// ```
+/// # use reactive_rs::*; use std::cell::RefCell; use std::rc::Rc;
+/// let out = RefCell::new(Vec::new());
+/// let stream = SimpleBroadcast::<i32>::new();
+/// let child1 = stream
+///     .clone()
+///     .subscribe(|x| out.borrow_mut().push(*x + 1));
+/// let child2 = stream
+///     .clone()
+///     .subscribe(|x| out.borrow_mut().push(*x + 7));
+/// stream.feed(1..=3);
+/// assert_eq!(&*out.borrow(), &[2, 8, 3, 9, 4, 10]);
+/// ```
 pub struct Broadcast<'a, C: ?Sized, T: ?Sized> {
     observers: Rc<RefCell<Vec<Callback<'a, C, T>>>>,
 }
@@ -489,7 +537,8 @@ impl<'a, C: 'a + ?Sized, T: 'a + ?Sized> Broadcast<'a, C, T> {
         Self { observers: Rc::new(RefCell::new(Vec::new())) }
     }
 
-    /// Create a broadcast from a stream, enabling multiple observers.
+    /// Create a broadcast from a stream, enabling multiple observers
+    /// ("fork" the stream).
     ///
     /// Note: this is equivalent to calling
     /// [`broadcast()`](trait.Stream.html#provided-methods) on the stream object.
