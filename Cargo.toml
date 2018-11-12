@@ -1,13 +1,17 @@
 [package]
 name = "reactive-rs"
-authors = ["Ivan Smirnov <i.s.smirnov@gmail.com>"]
 version = "0.1.0"
-license = "MIT"
+authors = ["Ivan Smirnov <i.s.smirnov@gmail.com>"]
+description = "FRP in Rust: streams and broadcasts."
+keywords = ["reactive", "frp", "stream", "broadcast"]
+documentation = "http://docs.rs/reactive-rs/"
+homepage = "https://github.com/aldanor/reactive-rs"
 repository = "https://github.com/aldanor/reactive-rs"
-keywords = ["reactive", "frp", "stream"]
+readme = "README.md"
+license = "MIT"
 
 [badges]
-travis-ci = { repository = "aldanor/reactive-rs", branch = "master" }
+travis-ci = { repository = "aldanor/reactive-rs" }
 
 [dependencies]
 slice-deque = { version = "0.1", optional = true }
