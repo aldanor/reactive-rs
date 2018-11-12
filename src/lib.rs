@@ -9,7 +9,7 @@
 //!
 //! ## Purpose
 //!
-//! The main use case of this crate is to simplify creating efficient
+//! The main use case of this library is to simplify creating efficient
 //! computational DAGs (or computational trees, to be precise) that operate
 //! on streams of values. It does not aim to replicate the entire galaxy of
 //! ReactiveX operators, nor does it attempt to delve into
